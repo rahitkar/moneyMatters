@@ -9,28 +9,34 @@ interface TagBadgeProps {
 }
 
 export default function TagBadge({ tag, size = 'md', onRemove }: TagBadgeProps) {
+  const maxChars = size === 'sm' ? 8 : 14;
+  const display = tag.name.length > maxChars ? tag.name.slice(0, maxChars - 1) + '…' : tag.name;
+
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 rounded-full font-medium group/tag',
+        'relative inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap group/tag border',
         {
-          'px-2 py-0.5 text-xs': size === 'sm',
-          'px-2.5 py-1 text-xs': size === 'md',
+          'px-1.5 py-px text-xs leading-4': size === 'sm',
+          'px-2 py-0.5 text-xs': size === 'md',
         }
       )}
       style={{
-        backgroundColor: `${tag.color}20`,
+        backgroundColor: `${tag.color}12`,
         color: tag.color,
+        borderColor: `${tag.color}30`,
       }}
+      title={tag.name}
     >
-      {tag.name}
+      {display}
       {onRemove && (
         <button
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
           }}
-          className="ml-0.5 rounded-full p-0.5 opacity-0 group-hover/tag:opacity-100 hover:bg-white/10 transition-all"
+          className="absolute -top-1.5 -right-1.5 rounded-full p-0.5 opacity-0 group-hover/tag:opacity-100 transition-all"
+          style={{ backgroundColor: tag.color, color: '#18181b' }}
         >
           <X className="w-2.5 h-2.5" />
         </button>

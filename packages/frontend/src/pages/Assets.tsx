@@ -875,6 +875,20 @@ export default function Assets() {
         <Card padding="sm">
           <div>
             <table className="w-full table-fixed">
+              <colgroup>
+                {bulkSelectMode && <col className="w-8" />}
+                <col className="w-8" />
+                <col style={{ width: '20%' }} />
+                <col className="w-[72px]" />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '8%' }} />
+              </colgroup>
               <thead>
                 <tr className="border-b border-surface-700">
                   {bulkSelectMode && (
@@ -890,7 +904,7 @@ export default function Assets() {
                   )}
                   <th className="table-header w-8"></th>
                   <SortableHeader field="name" label="Name" current={sortField} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader field="assetClass" label="Class" current={sortField} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader field="assetClass" label="Class" current={sortField} dir={sortDir} onSort={handleSort} align="center" />
                   <SortableHeader field="quantity" label="Qty" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="averageCost" label="Avg Cost" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="currentPrice" label="LTP" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
@@ -1104,15 +1118,15 @@ function SortableHeader({
   current: SortField;
   dir: SortDirection;
   onSort: (field: SortField) => void;
-  align?: 'right';
+  align?: 'right' | 'center';
 }) {
   const isActive = current === field;
   return (
     <th
-      className={clsx('table-header cursor-pointer select-none hover:text-surface-100 transition-colors', align === 'right' && 'text-right')}
+      className={clsx('table-header cursor-pointer select-none hover:text-surface-100 transition-colors', align === 'right' && 'text-right', align === 'center' && 'text-center')}
       onClick={() => onSort(field)}
     >
-      <span className={clsx('inline-flex items-center gap-1', align === 'right' && 'justify-end')}>
+      <span className={clsx('inline-flex items-center gap-1', align === 'right' && 'justify-end', align === 'center' && 'justify-center')}>
         {label}
         {isActive ? (
           dir === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />
@@ -1275,7 +1289,7 @@ function PositionRow({
           </button>
         </div>
       </td>
-      <td className="table-cell">
+      <td className="table-cell text-center">
         <AssetClassBadge assetClass={position.assetClass} size="sm" />
       </td>
       <td className="table-cell text-right tabular-nums">

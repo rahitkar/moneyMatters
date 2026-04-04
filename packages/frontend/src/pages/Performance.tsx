@@ -98,6 +98,11 @@ export default function Performance() {
       </Card>
 
       {/* Summary Stats */}
+      {usdToInr && (
+        <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
+          1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </p>
+      )}
       {comparison && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard

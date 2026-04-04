@@ -5,27 +5,27 @@ const ASSET_CLASS_CONFIG: Record<
   AssetClass,
   { label: string; color: string; bg: string }
 > = {
-  stocks: { label: 'Stocks', color: 'text-blue-400', bg: 'bg-blue-500/20' },
+  stocks: { label: 'Stock', color: 'text-blue-400', bg: 'bg-blue-500/20' },
   etf: { label: 'ETF', color: 'text-purple-400', bg: 'bg-purple-500/20' },
-  mutual_fund: { label: 'Mutual Fund', color: 'text-indigo-400', bg: 'bg-indigo-500/20' },
-  mutual_fund_equity: { label: 'MF Equity', color: 'text-indigo-400', bg: 'bg-indigo-500/20' },
+  mutual_fund: { label: 'MF', color: 'text-indigo-400', bg: 'bg-indigo-500/20' },
+  mutual_fund_equity: { label: 'MF Eq', color: 'text-indigo-400', bg: 'bg-indigo-500/20' },
   mutual_fund_debt: { label: 'MF Debt', color: 'text-teal-400', bg: 'bg-teal-500/20' },
   crypto: { label: 'Crypto', color: 'text-orange-400', bg: 'bg-orange-500/20' },
-  bonds: { label: 'Bonds', color: 'text-cyan-400', bg: 'bg-cyan-500/20' },
+  bonds: { label: 'Bond', color: 'text-cyan-400', bg: 'bg-cyan-500/20' },
   real_estate: { label: 'Property', color: 'text-emerald-400', bg: 'bg-emerald-500/20' },
   vehicle: { label: 'Vehicle', color: 'text-rose-400', bg: 'bg-rose-500/20' },
   gold: { label: 'Gold', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
-  gold_physical: { label: 'Gold (Physical)', color: 'text-yellow-500', bg: 'bg-yellow-600/20' },
+  gold_physical: { label: 'Gold ₽', color: 'text-yellow-500', bg: 'bg-yellow-600/20' },
   silver: { label: 'Silver', color: 'text-slate-300', bg: 'bg-slate-400/20' },
-  silver_physical: { label: 'Silver (Physical)', color: 'text-slate-400', bg: 'bg-slate-500/20' },
-  metals: { label: 'Commodities', color: 'text-amber-400', bg: 'bg-amber-500/20' },
+  silver_physical: { label: 'Silver ₽', color: 'text-slate-400', bg: 'bg-slate-500/20' },
+  metals: { label: 'Cmdty', color: 'text-amber-400', bg: 'bg-amber-500/20' },
   ppf: { label: 'PPF', color: 'text-teal-300', bg: 'bg-teal-400/20' },
   epf: { label: 'EPF', color: 'text-teal-400', bg: 'bg-teal-500/20' },
   nps: { label: 'NPS', color: 'text-cyan-400', bg: 'bg-cyan-500/20' },
-  fixed_deposit: { label: 'Fixed Deposit', color: 'text-emerald-300', bg: 'bg-emerald-400/20' },
-  lended: { label: 'Lended', color: 'text-orange-300', bg: 'bg-orange-400/20' },
+  fixed_deposit: { label: 'FD', color: 'text-emerald-300', bg: 'bg-emerald-400/20' },
+  lended: { label: 'Lent', color: 'text-orange-300', bg: 'bg-orange-400/20' },
   cash: { label: 'Cash', color: 'text-green-400', bg: 'bg-green-500/20' },
-  external_portfolio: { label: 'External Portfolio', color: 'text-violet-400', bg: 'bg-violet-500/20' },
+  external_portfolio: { label: 'Ext. PF', color: 'text-violet-400', bg: 'bg-violet-500/20' },
 };
 
 interface AssetClassBadgeProps {
@@ -39,7 +39,7 @@ export default function AssetClassBadge({ assetClass, size = 'md' }: AssetClassB
   return (
     <span
       className={clsx(
-        'inline-flex items-center rounded-full font-medium',
+        'inline-flex items-center justify-center rounded-full font-medium whitespace-nowrap',
         config.color,
         config.bg,
         {

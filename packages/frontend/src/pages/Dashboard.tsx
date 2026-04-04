@@ -219,6 +219,22 @@ export default function Dashboard() {
     );
   }, [holdings, selectedSlice, allocDimension]);
 
+  const filteredTop5 = useMemo(() => {
+    const source = selectedSlice ? filteredHoldings : (topPerformers ?? []);
+    if (selectedSlice) {
+      return [...source].sort((a, b) => b.gainPercent - a.gainPercent).slice(0, 5);
+    }
+    return source;
+  }, [filteredHoldings, topPerformers, selectedSlice]);
+
+  const filteredWorst5 = useMemo(() => {
+    const source = selectedSlice ? filteredHoldings : (worstPerformers ?? []);
+    if (selectedSlice) {
+      return [...source].sort((a, b) => a.gainPercent - b.gainPercent).slice(0, 5);
+    }
+    return source;
+  }, [filteredHoldings, worstPerformers, selectedSlice]);
+
   const handleDimensionChange = (dim: AllocDimension) => {
     setAllocDimension(dim);
     setSelectedSlice(null);
@@ -272,6 +288,11 @@ export default function Dashboard() {
       </div>
 
       {/* Summary Stats */}
+      {usdToInr && (
+        <p className="text-xs text-surface-500 text-right tabular-nums -mb-6">
+          1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="animate-slide-up">
           <div className="flex items-start justify-between">
@@ -700,13 +721,18 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Top Performers */}
         <Card className="animate-slide-up">
-          <h2 className="text-lg font-semibold text-surface-100 mb-6 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-green-400" />
-            Top Performers
-          </h2>
-          {topPerformers && topPerformers.length > 0 ? (
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-green-400" />
+              Top Performers
+              {selectedSlice && (
+                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
+              )}
+            </h2>
+          </div>
+          {filteredTop5.length > 0 ? (
             <div className="space-y-4">
-              {topPerformers.map((holding, index) => (
+              {filteredTop5.map((holding, index) => (
                 <div
                   key={holding.id}
                   className="flex items-center justify-between"
@@ -730,20 +756,25 @@ export default function Dashboard() {
             </div>
           ) : (
             <p className="text-surface-500 text-center py-8">
-              No performance data yet
+              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
             </p>
           )}
         </Card>
 
         {/* Worst Performers */}
         <Card className="animate-slide-up animate-delay-100">
-          <h2 className="text-lg font-semibold text-surface-100 mb-6 flex items-center gap-2">
-            <TrendingDown className="w-5 h-5 text-red-400" />
-            Worst Performers
-          </h2>
-          {worstPerformers && worstPerformers.length > 0 ? (
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
+              <TrendingDown className="w-5 h-5 text-red-400" />
+              Worst Performers
+              {selectedSlice && (
+                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
+              )}
+            </h2>
+          </div>
+          {filteredWorst5.length > 0 ? (
             <div className="space-y-4">
-              {worstPerformers.map((holding, index) => (
+              {filteredWorst5.map((holding, index) => (
                 <div
                   key={holding.id}
                   className="flex items-center justify-between"
@@ -767,7 +798,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <p className="text-surface-500 text-center py-8">
-              No performance data yet
+              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
             </p>
           )}
         </Card>

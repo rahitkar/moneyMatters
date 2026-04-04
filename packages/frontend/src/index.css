@@ -112,11 +112,11 @@ body {
   }
 
   .table-header {
-    @apply text-left text-xs font-semibold uppercase tracking-wider text-surface-400 px-4 py-3;
+    @apply text-left text-xs font-semibold uppercase tracking-wider text-surface-400 px-4 py-3 align-middle;
   }
 
   .table-cell {
-    @apply px-4 py-4 text-sm text-surface-200;
+    @apply px-4 py-4 text-sm text-surface-200 align-middle;
   }
 
   .badge {

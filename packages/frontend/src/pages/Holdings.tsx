@@ -15,7 +15,7 @@ import {
   useDeleteAsset,
   useExchangeRate,
 } from '../api/hooks';
-import { formatNumber, formatPercent } from '../lib/format';
+import { formatNumber, formatPercent, formatCurrency } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { HoldingWithValue, Asset, AssetClass } from '../api/types';
 
@@ -97,6 +97,12 @@ export default function Holdings() {
           Add Holding
         </button>
       </div>
+
+      {usdToInr && (
+        <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
+          1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </p>
+      )}
 
       {/* Filters */}
       <Card padding="sm">
