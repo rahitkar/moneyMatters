@@ -9,14 +9,17 @@ export type AssetClass =
   | 'real_estate'
   | 'vehicle'
   | 'gold'
+  | 'gold_physical'
   | 'silver'
+  | 'silver_physical'
   | 'metals'
   | 'ppf'
   | 'epf'
   | 'nps'
   | 'fixed_deposit'
   | 'lended'
-  | 'cash';
+  | 'cash'
+  | 'external_portfolio';
 
 export type Provider = 'yahoo_finance' | 'coingecko' | 'metals_api' | 'manual';
 
@@ -117,6 +120,7 @@ export interface MultiDimensionalAllocation {
   byCurrency: DimensionSlice[];
   bySubCategory: DimensionSlice[];
   byLiquidity: DimensionSlice[];
+  byOwnership: DimensionSlice[];
 }
 
 export interface MarketQuote {

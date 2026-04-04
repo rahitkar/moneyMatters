@@ -5,7 +5,7 @@ import { transactionService } from './transaction.service.js';
 import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 import type { AssetClass } from '../db/schema.js';
 
-const PHYSICAL_METAL_CLASSES = new Set<string>(['gold', 'silver', 'metals']);
+const PHYSICAL_METAL_CLASSES = new Set<string>(['gold_physical', 'silver_physical']);
 const METAL_SELL_FACTOR = 0.95;
 
 async function getUsdToInr(): Promise<number | null> {
@@ -51,13 +51,14 @@ export interface MultiDimensionalAllocation {
   byCurrency: DimensionSlice[];
   bySubCategory: DimensionSlice[];
   byLiquidity: DimensionSlice[];
+  byOwnership: DimensionSlice[];
 }
 
 const isIndianSymbol = (symbol: string) =>
   symbol.endsWith('.NS') || symbol.endsWith('.BO');
 
 const GOV_SCHEME_CLASSES = new Set(['ppf', 'epf', 'nps']);
-const METAL_CLASSES = new Set(['gold', 'silver', 'metals']);
+const METAL_CLASSES = new Set(['gold', 'gold_physical', 'silver', 'silver_physical', 'metals']);
 const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended', 'bonds']);
 
 const MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
@@ -67,6 +68,7 @@ function getGeography(assetClass: string, symbol: string): string {
   if (CASH_EQUIV_CLASSES.has(assetClass)) return 'Cash & Equivalents';
   if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
   if (assetClass === 'crypto') return 'Crypto';
+  if (assetClass === 'external_portfolio') return 'External';
   if (GOV_SCHEME_CLASSES.has(assetClass)) return 'India';
   if (MF_CLASSES.has(assetClass)) return 'India';
   return isIndianSymbol(symbol) ? 'India' : 'International';
@@ -77,13 +79,14 @@ function getInstrumentType(assetClass: string): string {
     case 'stocks': return 'Equities';
     case 'etf': return 'ETFs';
     case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
-    case 'gold': case 'silver': case 'metals': return 'Commodities';
+    case 'gold': case 'gold_physical': case 'silver': case 'silver_physical': case 'metals': return 'Commodities';
     case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
     case 'fixed_deposit': case 'bonds': return 'Fixed Income';
     case 'crypto': return 'Crypto';
     case 'lended': return 'Lended';
     case 'cash': return 'Cash';
     case 'real_estate': case 'vehicle': return 'Physical Assets';
+    case 'external_portfolio': return 'External Portfolio';
     default: return 'Other';
   }
 }
@@ -91,7 +94,8 @@ function getInstrumentType(assetClass: string): string {
 function getRiskProfile(assetClass: string): string {
   switch (assetClass) {
     case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
-    case 'gold': case 'silver': case 'metals': case 'crypto':
+    case 'gold': case 'gold_physical': case 'silver': case 'silver_physical':
+    case 'metals': case 'crypto':
       return 'Growth Investment';
     case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit':
       return 'Protective Investment';
@@ -103,6 +107,8 @@ function getRiskProfile(assetClass: string): string {
       return 'Physical Asset';
     case 'cash':
       return 'Cash';
+    case 'external_portfolio':
+      return 'Growth Investment';
     default: return 'Other';
   }
 }
@@ -111,13 +117,19 @@ function getLiquidity(assetClass: string): string {
   switch (assetClass) {
     case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
     case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
-      return 'Liquid';
+    case 'fixed_deposit': case 'external_portfolio':
     case 'gold': case 'silver': case 'metals':
-    case 'ppf': case 'epf': case 'nps': case 'fixed_deposit':
+      return 'Liquid';
+    case 'gold_physical': case 'silver_physical':
+    case 'ppf': case 'epf': case 'nps':
     case 'lended': case 'real_estate': case 'vehicle':
       return 'Non-Liquid';
     default: return 'Other';
   }
+}
+
+function getOwnership(assetClass: string): string {
+  return assetClass === 'external_portfolio' ? "Dad's Portfolio" : 'My Portfolio';
 }
 
 function getAssetClassLabel(assetClass: string): string {
@@ -126,7 +138,9 @@ function getAssetClassLabel(assetClass: string): string {
     case 'etf': return 'ETF';
     case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
     case 'gold': return 'Gold';
+    case 'gold_physical': return 'Gold (Physical)';
     case 'silver': return 'Silver';
+    case 'silver_physical': return 'Silver (Physical)';
     case 'metals': return 'Commodities';
     case 'ppf': return 'PPF';
     case 'epf': return 'EPF';
@@ -138,6 +152,7 @@ function getAssetClassLabel(assetClass: string): string {
     case 'bonds': return 'Bonds';
     case 'real_estate': return 'Property';
     case 'vehicle': return 'Vehicle';
+    case 'external_portfolio': return 'External Portfolio';
     default: return assetClass;
   }
 }
@@ -149,8 +164,10 @@ function getSubCategory(assetClass: string, symbol: string): string {
     case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
     case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
     case 'mutual_fund_debt': return 'MF Debt';
-    case 'gold': return 'Gold';
-    case 'silver': return 'Silver';
+    case 'gold': return 'Gold ETF';
+    case 'gold_physical': return 'Gold (Physical)';
+    case 'silver': return 'Silver ETF';
+    case 'silver_physical': return 'Silver (Physical)';
     case 'metals': return 'Commodities';
     case 'ppf': return 'PPF';
     case 'epf': return 'EPF';
@@ -162,6 +179,7 @@ function getSubCategory(assetClass: string, symbol: string): string {
     case 'bonds': return 'Bonds';
     case 'real_estate': return 'Property';
     case 'vehicle': return 'Vehicle';
+    case 'external_portfolio': return 'External Portfolio';
     default: return assetClass;
   }
 }
@@ -436,6 +454,7 @@ export const portfolioService = {
     const byCurrency = new Map<string, { value: number; count: number }>();
     const bySubCategory = new Map<string, { value: number; count: number }>();
     const byLiquidity = new Map<string, { value: number; count: number }>();
+    const byOwnership = new Map<string, { value: number; count: number }>();
 
     let totalValue = 0;
 
@@ -460,6 +479,7 @@ export const portfolioService = {
       addTo(byCurrency, p.currency || 'INR');
       addTo(bySubCategory, getSubCategory(p.assetClass, p.symbol));
       addTo(byLiquidity, getLiquidity(p.assetClass));
+      addTo(byOwnership, getOwnership(p.assetClass));
     }
 
     return {
@@ -470,6 +490,7 @@ export const portfolioService = {
       byCurrency: buildDimensionSlices(byCurrency, totalValue),
       bySubCategory: buildDimensionSlices(bySubCategory, totalValue),
       byLiquidity: buildDimensionSlices(byLiquidity, totalValue),
+      byOwnership: buildDimensionSlices(byOwnership, totalValue),
     };
   },
 };

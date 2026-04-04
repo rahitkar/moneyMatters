@@ -40,16 +40,17 @@ import { formatCurrency, formatPercent, formatNumber, formatDate } from '../lib/
 import CurrencyValue from '../components/CurrencyValue';
 import type { TimeInterval, DimensionSlice } from '../api/types';
 
-type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity';
+type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity' | 'byOwnership';
 
 const DIMENSION_TABS: { value: AllocDimension; label: string }[] = [
-  { value: 'bySubCategory', label: 'Sub-Category' },
-  { value: 'byAssetClass', label: 'Asset Class' },
-  { value: 'byGeography', label: 'Geography' },
-  { value: 'byInstrumentType', label: 'Instrument' },
   { value: 'byRiskProfile', label: 'Risk Profile' },
+  { value: 'byAssetClass', label: 'Asset Class' },
+  { value: 'bySubCategory', label: 'Sub-Category' },
+  { value: 'byInstrumentType', label: 'Instrument' },
+  { value: 'byGeography', label: 'Geography' },
   { value: 'byLiquidity', label: 'Liquidity' },
   { value: 'byCurrency', label: 'Currency' },
+  { value: 'byOwnership', label: 'Ownership' },
 ];
 
 const SLICE_COLORS = [
@@ -63,9 +64,33 @@ function getSliceColor(index: number): string {
   return SLICE_COLORS[index % SLICE_COLORS.length];
 }
 
+function AllocTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { fill?: string } }> }) {
+  if (!active || !payload?.[0]) return null;
+  const { name, value, payload: item } = payload[0];
+  const color = item.fill || '#3b82f6';
+  return (
+    <div
+      className="rounded-lg px-3.5 py-2.5 shadow-xl text-sm"
+      style={{
+        backgroundColor: '#18181b',
+        border: `1px solid ${color}50`,
+        boxShadow: `0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px ${color}25`,
+      }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+        <span className="font-medium text-surface-200">{name}</span>
+      </div>
+      <span className="text-surface-100 font-semibold tabular-nums" style={{ color }}>
+        {formatCurrency(value, 'INR')}
+      </span>
+    </div>
+  );
+}
+
 const isIndianSymbol = (s: string) => s.endsWith('.NS') || s.endsWith('.BO');
 
-const METAL_CLASSES = new Set(['gold', 'silver', 'metals']);
+const METAL_CLASSES = new Set(['gold', 'gold_physical', 'silver', 'silver_physical', 'metals']);
 const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended', 'bonds']);
 const GOV_SCHEME_CLASSES = new Set(['ppf', 'epf', 'nps']);
 const MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
@@ -79,12 +104,15 @@ function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol
         case 'etf': return 'ETF';
         case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
         case 'gold': return 'Gold';
+        case 'gold_physical': return 'Gold (Physical)';
         case 'silver': return 'Silver';
+        case 'silver_physical': return 'Silver (Physical)';
         case 'metals': return 'Commodities';
         case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
         case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
         case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
         case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
         default: return assetClass;
       }
     case 'bySubCategory':
@@ -93,11 +121,14 @@ function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol
         case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
         case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
         case 'mutual_fund_debt': return 'MF Debt';
-        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'gold': return 'Gold ETF'; case 'gold_physical': return 'Gold (Physical)';
+        case 'silver': return 'Silver ETF'; case 'silver_physical': return 'Silver (Physical)';
+        case 'metals': return 'Commodities';
         case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
         case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
         case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
         case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
         default: return assetClass;
       }
     case 'byGeography':
@@ -105,6 +136,7 @@ function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol
       if (CASH_EQUIV_CLASSES.has(assetClass)) return 'Cash & Equivalents';
       if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
       if (assetClass === 'crypto') return 'Crypto';
+      if (assetClass === 'external_portfolio') return 'External';
       if (GOV_SCHEME_CLASSES.has(assetClass) || MF_CLASSES.has(assetClass)) return 'India';
       return indian ? 'India' : 'International';
     case 'byInstrumentType':
@@ -112,18 +144,21 @@ function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol
         case 'stocks': return 'Equities';
         case 'etf': return 'ETFs';
         case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
-        case 'gold': case 'silver': case 'metals': return 'Commodities';
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical': case 'metals': return 'Commodities';
         case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
         case 'fixed_deposit': case 'bonds': return 'Fixed Income';
         case 'crypto': return 'Crypto'; case 'lended': return 'Lended';
         case 'cash': return 'Cash';
         case 'real_estate': case 'vehicle': return 'Physical Assets';
+        case 'external_portfolio': return 'External Portfolio';
         default: return 'Other';
       }
     case 'byRiskProfile':
       switch (assetClass) {
         case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
-        case 'gold': case 'silver': case 'metals': case 'crypto':
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical':
+        case 'metals': case 'crypto':
+        case 'external_portfolio':
           return 'Growth Investment';
         case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit':
           return 'Protective Investment';
@@ -137,11 +172,19 @@ function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol
       switch (assetClass) {
         case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
         case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+        case 'fixed_deposit': case 'external_portfolio':
+        case 'gold': case 'silver': case 'metals':
           return 'Liquid';
-        default: return 'Non-Liquid';
+        case 'gold_physical': case 'silver_physical':
+        case 'ppf': case 'epf': case 'nps':
+        case 'lended': case 'real_estate': case 'vehicle':
+          return 'Non-Liquid';
+        default: return 'Other';
       }
     case 'byCurrency':
       return currency || 'INR';
+    case 'byOwnership':
+      return assetClass === 'external_portfolio' ? "Dad's Portfolio" : 'My Portfolio';
   }
 }
 
@@ -156,7 +199,7 @@ const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
 export default function Dashboard() {
   const navigate = useNavigate();
   const [perfInterval, setPerfInterval] = useState<TimeInterval>('1M');
-  const [allocDimension, setAllocDimension] = useState<AllocDimension>('bySubCategory');
+  const [allocDimension, setAllocDimension] = useState<AllocDimension>('byRiskProfile');
   const [selectedSlice, setSelectedSlice] = useState<string | null>(null);
   const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
   const { data: multiAlloc, isLoading: allocationLoading } = useMultiDimensionalAllocation();
@@ -382,14 +425,7 @@ export default function Dashboard() {
                           />
                         ))}
                       </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#27272a',
-                          border: '1px solid #3f3f46',
-                          borderRadius: '12px',
-                        }}
-                        formatter={(value: number) => formatCurrency(value, 'INR')}
-                      />
+                      <Tooltip content={<AllocTooltip />} />
                     </RechartsPie>
                   </ResponsiveContainer>
                 </div>
@@ -622,10 +658,14 @@ export default function Dashboard() {
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#27272a',
+                      backgroundColor: '#18181b',
                       border: '1px solid #3f3f46',
-                      borderRadius: '12px',
+                      borderRadius: '10px',
+                      padding: '8px 14px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
                     }}
+                    itemStyle={{ color: '#e4e4e7' }}
+                    labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
                     labelFormatter={(d) => formatDate(d)}
                     formatter={(value: number) => [formatCurrency(value, 'INR'), 'Value']}
                   />

@@ -25,7 +25,7 @@ const isIndianSymbol = (symbol: string) =>
 type PrimaryCategory = 'all' | 'india' | 'international' | 'metals' | 'crypto' | 'cash_equiv';
 
 const GOV_SCHEME_CLASSES: AssetClass[] = ['ppf', 'epf', 'nps'];
-const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+const METAL_CLASSES: AssetClass[] = ['gold', 'gold_physical', 'silver', 'silver_physical', 'metals'];
 const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'lended'];
 const MF_CLASSES: AssetClass[] = ['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt'];
 
@@ -44,6 +44,7 @@ function getHoldingPrimaryCategory(assetClass: string, symbol: string): PrimaryC
   if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass)) return 'india';
   if (MF_CLASSES.includes(assetClass as AssetClass)) return 'india';
   if (assetClass === 'crypto') return 'crypto';
+  if (assetClass === 'external_portfolio') return 'india';
   return isIndianSymbol(symbol) ? 'india' : 'international';
 }
 

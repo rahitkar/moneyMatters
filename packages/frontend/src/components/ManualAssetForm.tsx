@@ -15,6 +15,7 @@ const MANUAL_ASSET_TYPES: { value: AssetClass; label: string }[] = [
   { value: 'lended', label: 'Lended Money' },
   { value: 'real_estate', label: 'Property' },
   { value: 'vehicle', label: 'Vehicle' },
+  { value: 'external_portfolio', label: 'External Portfolio' },
 ];
 
 interface FieldConfig {
@@ -34,6 +35,7 @@ const FIELD_CONFIG: Record<string, FieldConfig> = {
   lended: { institutionLabel: 'Borrower', showInterestRate: true, showMaturityDate: true, maturityLabel: 'Expected Return Date' },
   real_estate: { institutionLabel: 'Location', showInterestRate: false, showMaturityDate: false },
   vehicle: { institutionLabel: 'Make / Model', showInterestRate: false, showMaturityDate: false },
+  external_portfolio: { institutionLabel: 'Managed by', showInterestRate: false, showMaturityDate: false },
 };
 
 interface ManualAssetFormProps {

@@ -15,7 +15,9 @@ const ASSET_CLASS_CONFIG: Record<
   real_estate: { label: 'Property', color: 'text-emerald-400', bg: 'bg-emerald-500/20' },
   vehicle: { label: 'Vehicle', color: 'text-rose-400', bg: 'bg-rose-500/20' },
   gold: { label: 'Gold', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
+  gold_physical: { label: 'Gold (Physical)', color: 'text-yellow-500', bg: 'bg-yellow-600/20' },
   silver: { label: 'Silver', color: 'text-slate-300', bg: 'bg-slate-400/20' },
+  silver_physical: { label: 'Silver (Physical)', color: 'text-slate-400', bg: 'bg-slate-500/20' },
   metals: { label: 'Commodities', color: 'text-amber-400', bg: 'bg-amber-500/20' },
   ppf: { label: 'PPF', color: 'text-teal-300', bg: 'bg-teal-400/20' },
   epf: { label: 'EPF', color: 'text-teal-400', bg: 'bg-teal-500/20' },
@@ -23,6 +25,7 @@ const ASSET_CLASS_CONFIG: Record<
   fixed_deposit: { label: 'Fixed Deposit', color: 'text-emerald-300', bg: 'bg-emerald-400/20' },
   lended: { label: 'Lended', color: 'text-orange-300', bg: 'bg-orange-400/20' },
   cash: { label: 'Cash', color: 'text-green-400', bg: 'bg-green-500/20' },
+  external_portfolio: { label: 'External Portfolio', color: 'text-violet-400', bg: 'bg-violet-500/20' },
 };
 
 interface AssetClassBadgeProps {
@@ -62,7 +65,9 @@ export function getAssetClassColor(assetClass: AssetClass): string {
     real_estate: '#10b981',
     vehicle: '#fb7185',
     gold: '#eab308',
+    gold_physical: '#ca8a04',
     silver: '#94a3b8',
+    silver_physical: '#64748b',
     metals: '#f59e0b',
     ppf: '#5eead4',
     epf: '#2dd4bf',
@@ -70,6 +75,7 @@ export function getAssetClassColor(assetClass: AssetClass): string {
     fixed_deposit: '#6ee7b7',
     lended: '#fdba74',
     cash: '#22c55e',
+    external_portfolio: '#8b5cf6',
   };
   return colors[assetClass];
 }

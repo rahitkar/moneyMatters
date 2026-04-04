@@ -36,7 +36,9 @@ function getProviderForAssetClass(assetClass: AssetClass): Provider {
     case 'crypto':
       return 'coingecko';
     case 'gold':
+    case 'gold_physical':
     case 'silver':
+    case 'silver_physical':
     case 'metals':
       return 'metals_api';
     case 'ppf':
@@ -48,6 +50,7 @@ function getProviderForAssetClass(assetClass: AssetClass): Provider {
     case 'vehicle':
     case 'lended':
     case 'cash':
+    case 'external_portfolio':
       return 'manual';
     default:
       return 'yahoo_finance';

@@ -3,8 +3,8 @@ import type { AssetClass } from '../api/types';
 import { useCreateAsset, useCreateTransaction } from '../api/hooks';
 
 const METAL_TYPES: { value: AssetClass; label: string; symbol: string }[] = [
-  { value: 'gold', label: 'Gold', symbol: 'GOLD' },
-  { value: 'silver', label: 'Silver', symbol: 'SILVER' },
+  { value: 'gold_physical', label: 'Gold', symbol: 'GOLD' },
+  { value: 'silver_physical', label: 'Silver', symbol: 'SILVER' },
 ];
 
 interface PhysicalMetalFormProps {

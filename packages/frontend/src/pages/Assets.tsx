@@ -66,7 +66,7 @@ interface SubFilterDef {
 }
 
 const GOV_SCHEME_CLASSES: AssetClass[] = ['ppf', 'epf', 'nps'];
-const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+const METAL_CLASSES: AssetClass[] = ['gold', 'gold_physical', 'silver', 'silver_physical', 'metals'];
 const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'bonds', 'lended'];
 const PHYSICAL_ASSET_CLASSES: AssetClass[] = ['real_estate', 'vehicle'];
 
@@ -105,8 +105,10 @@ const SUB_FILTERS: Record<PrimaryCategory, SubFilterDef[]> = {
   ],
   metals: [
     { value: 'all', label: 'All' },
-    { value: 'gold', label: 'Gold' },
-    { value: 'silver', label: 'Silver' },
+    { value: 'gold', label: 'Gold ETF' },
+    { value: 'gold_physical', label: 'Gold (Physical)' },
+    { value: 'silver', label: 'Silver ETF' },
+    { value: 'silver_physical', label: 'Silver (Physical)' },
     { value: 'other_metals', label: 'Commodities' },
   ],
   crypto: [],
@@ -125,8 +127,8 @@ const SUB_FILTERS: Record<PrimaryCategory, SubFilterDef[]> = {
 };
 
 const MF_CLASSES: AssetClass[] = ['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt'];
-const MANUAL_ASSET_CLASSES: Set<AssetClass> = new Set(['ppf', 'epf', 'nps', 'fixed_deposit', 'bonds', 'cash', 'lended', 'real_estate', 'vehicle']);
-const PHYSICAL_METAL_CLASSES: Set<AssetClass> = new Set(['gold', 'silver', 'metals']);
+const MANUAL_ASSET_CLASSES: Set<AssetClass> = new Set(['ppf', 'epf', 'nps', 'fixed_deposit', 'bonds', 'cash', 'lended', 'real_estate', 'vehicle', 'external_portfolio', 'gold_physical', 'silver_physical']);
+const PHYSICAL_METAL_CLASSES: Set<AssetClass> = new Set(['gold_physical', 'silver_physical']);
 
 function getAssetPrimaryCategory(assetClass: string, symbol: string): PrimaryCategory {
   if (METAL_CLASSES.includes(assetClass as AssetClass)) return 'metals';
@@ -135,6 +137,7 @@ function getAssetPrimaryCategory(assetClass: string, symbol: string): PrimaryCat
   if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass)) return 'india';
   if (MF_CLASSES.includes(assetClass as AssetClass)) return 'india';
   if (assetClass === 'crypto') return 'crypto';
+  if (assetClass === 'external_portfolio') return 'all';
   if (assetClass === 'stocks' || assetClass === 'etf') {
     return isIndianSymbol(symbol) ? 'india' : 'international';
   }
@@ -156,7 +159,9 @@ function matchesSubFilter(p: Position, sub: string): boolean {
     case 'us_etf': return p.assetClass === 'etf' && !indian;
     case 'other_intl': return getAssetPrimaryCategory(p.assetClass, p.symbol) === 'international' && p.assetClass !== 'stocks' && p.assetClass !== 'etf';
     case 'gold': return p.assetClass === 'gold';
+    case 'gold_physical': return p.assetClass === 'gold_physical';
     case 'silver': return p.assetClass === 'silver';
+    case 'silver_physical': return p.assetClass === 'silver_physical';
     case 'other_metals': return p.assetClass === 'metals';
     case 'cash': return p.assetClass === 'cash';
     case 'fixed_deposit': return p.assetClass === 'fixed_deposit';
@@ -229,8 +234,10 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'bonds', label: 'Bonds' },
   { value: 'real_estate', label: 'Property' },
   { value: 'vehicle', label: 'Vehicle' },
-  { value: 'gold', label: 'Gold' },
-  { value: 'silver', label: 'Silver' },
+  { value: 'gold', label: 'Gold ETF' },
+  { value: 'gold_physical', label: 'Gold (Physical)' },
+  { value: 'silver', label: 'Silver ETF' },
+  { value: 'silver_physical', label: 'Silver (Physical)' },
   { value: 'metals', label: 'Commodities' },
   { value: 'ppf', label: 'PPF' },
   { value: 'epf', label: 'EPF' },
@@ -238,6 +245,7 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'fixed_deposit', label: 'Fixed Deposit' },
   { value: 'lended', label: 'Lended' },
   { value: 'cash', label: 'Cash' },
+  { value: 'external_portfolio', label: 'External Portfolio' },
 ];
 
 type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent';
@@ -281,7 +289,7 @@ function compareFn(a: Position, b: Position, field: SortField, dir: SortDirectio
   return dir === 'asc' ? cmp : -cmp;
 }
 
-type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity';
+type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity' | 'byOwnership';
 
 const ALLOC_MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
 
@@ -292,11 +300,14 @@ function getAllocDimensionLabel(dimension: AllocDimension, assetClass: string, s
       switch (assetClass) {
         case 'stocks': return 'Stocks'; case 'etf': return 'ETF';
         case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
-        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'gold': return 'Gold'; case 'gold_physical': return 'Gold (Physical)';
+        case 'silver': return 'Silver'; case 'silver_physical': return 'Silver (Physical)';
+        case 'metals': return 'Commodities';
         case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
         case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
         case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
         case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
         default: return assetClass;
       }
     case 'bySubCategory':
@@ -305,11 +316,14 @@ function getAllocDimensionLabel(dimension: AllocDimension, assetClass: string, s
         case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
         case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
         case 'mutual_fund_debt': return 'MF Debt';
-        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'gold': return 'Gold ETF'; case 'gold_physical': return 'Gold (Physical)';
+        case 'silver': return 'Silver ETF'; case 'silver_physical': return 'Silver (Physical)';
+        case 'metals': return 'Commodities';
         case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
         case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
         case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
         case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
         default: return assetClass;
       }
     case 'byGeography':
@@ -317,23 +331,27 @@ function getAllocDimensionLabel(dimension: AllocDimension, assetClass: string, s
       if (CASH_EQUIV_CLASSES.includes(assetClass as AssetClass)) return 'Cash & Equivalents';
       if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
       if (assetClass === 'crypto') return 'Crypto';
+      if (assetClass === 'external_portfolio') return 'External';
       if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass) || ALLOC_MF_CLASSES.has(assetClass)) return 'India';
       return indian ? 'India' : 'International';
     case 'byInstrumentType':
       switch (assetClass) {
         case 'stocks': return 'Equities'; case 'etf': return 'ETFs';
         case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
-        case 'gold': case 'silver': case 'metals': return 'Commodities';
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical': case 'metals': return 'Commodities';
         case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
         case 'fixed_deposit': case 'bonds': return 'Fixed Income';
         case 'crypto': return 'Crypto'; case 'lended': return 'Lended'; case 'cash': return 'Cash';
         case 'real_estate': case 'vehicle': return 'Physical Assets';
+        case 'external_portfolio': return 'External Portfolio';
         default: return 'Other';
       }
     case 'byRiskProfile':
       switch (assetClass) {
         case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
-        case 'gold': case 'silver': case 'metals': case 'crypto':
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical':
+        case 'metals': case 'crypto':
+        case 'external_portfolio':
           return 'Growth Investment';
         case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': return 'Protective Investment';
         case 'lended': return 'Lended';
@@ -346,11 +364,19 @@ function getAllocDimensionLabel(dimension: AllocDimension, assetClass: string, s
       switch (assetClass) {
         case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
         case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+        case 'fixed_deposit': case 'external_portfolio':
+        case 'gold': case 'silver': case 'metals':
           return 'Liquid';
-        default: return 'Non-Liquid';
+        case 'gold_physical': case 'silver_physical':
+        case 'ppf': case 'epf': case 'nps':
+        case 'lended': case 'real_estate': case 'vehicle':
+          return 'Non-Liquid';
+        default: return 'Other';
       }
     case 'byCurrency':
       return currency || 'INR';
+    case 'byOwnership':
+      return assetClass === 'external_portfolio' ? "Dad's Portfolio" : 'My Portfolio';
   }
 }
 
@@ -1126,6 +1152,7 @@ function PositionRow({
   onMetalTransaction: () => void;
 }) {
   const deleteAsset = useDeleteAsset();
+  const setAssetTags = useSetAssetTags();
   const { data: assetWithTags } = useAsset(position.assetId);
   const cur = position.currency || 'INR';
   const isManual = MANUAL_ASSET_CLASSES.has(position.assetClass);
@@ -1179,7 +1206,15 @@ function PositionRow({
           {assetWithTags?.tags && assetWithTags.tags.length > 0 && (
             <div className="flex gap-1 mt-1 flex-wrap">
               {assetWithTags.tags.slice(0, 2).map((tag) => (
-                <TagBadge key={tag.id} tag={tag} size="sm" />
+                <TagBadge
+                  key={tag.id}
+                  tag={tag}
+                  size="sm"
+                  onRemove={() => {
+                    const remaining = assetWithTags.tags!.filter((t) => t.id !== tag.id).map((t) => t.id);
+                    setAssetTags.mutate({ assetId: position.assetId, tagIds: remaining });
+                  }}
+                />
               ))}
               {assetWithTags.tags.length > 2 && (
                 <span className="text-xs text-surface-500">+{assetWithTags.tags.length - 2}</span>

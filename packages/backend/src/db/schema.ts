@@ -12,7 +12,9 @@ export const ASSET_CLASSES = [
   'real_estate',
   'vehicle',
   'gold',
+  'gold_physical',
   'silver',
+  'silver_physical',
   'metals',
   'ppf',
   'epf',
@@ -20,6 +22,7 @@ export const ASSET_CLASSES = [
   'fixed_deposit',
   'lended',
   'cash',
+  'external_portfolio',
 ] as const;
 
 export type AssetClass = (typeof ASSET_CLASSES)[number];
