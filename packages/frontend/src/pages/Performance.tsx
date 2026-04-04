@@ -35,7 +35,21 @@ const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
   { value: '1Y', label: '1Y' },
   { value: 'YTD', label: 'YTD' },
   { value: 'ALL', label: 'All' },
+  { value: 'CUSTOM', label: 'Custom' },
 ];
+
+const PORTFOLIO_SEGMENTS = [
+  { key: 'all', label: 'Total Portfolio' },
+  { key: 'indian_stocks', label: 'Indian Stocks' },
+  { key: 'international_stocks', label: "Int'l Stocks" },
+  { key: 'equity_mf', label: 'Equity MF' },
+  { key: 'debt_mf', label: 'Debt MF' },
+  { key: 'indian_etf', label: 'Indian ETF' },
+  { key: 'international_etf', label: "Int'l ETF" },
+  { key: 'crypto', label: 'Crypto' },
+  { key: 'gold', label: 'Gold' },
+  { key: 'all_equity', label: 'All Equity' },
+] as const;
 
 const CHART_COLORS = [
   '#22c55e', // Portfolio - green
@@ -46,24 +60,85 @@ const CHART_COLORS = [
   '#ec4899', // Pink
   '#eab308', // Yellow
   '#ef4444', // Red
+  '#10b981', // Emerald
+  '#6366f1', // Indigo
+  '#84cc16', // Lime
+  '#f43f5e', // Rose
+  '#14b8a6', // Teal
+  '#8b5cf6', // Violet
+  '#fb923c', // Amber
 ];
 
 export default function Performance() {
-  const [interval, setInterval] = useState<TimeInterval>('1M');
-  const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(['^GSPC', '^NSEI']);
+  const [selectedInterval, setSelectedInterval] = useState<TimeInterval>('1M');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+
+  // Applied state — drives the API call
+  const [appliedInterval, setAppliedInterval] = useState<TimeInterval>('1M');
+  const [appliedBenchmarks, setAppliedBenchmarks] = useState<string[]>(['^GSPC', '^NSEI']);
+  const [appliedSegments, setAppliedSegments] = useState<string[]>(['all']);
+  const [appliedDateRange, setAppliedDateRange] = useState<{ start?: string; end?: string }>({});
+
+  // Draft state — local picks before user hits "Apply"
+  const [draftBenchmarks, setDraftBenchmarks] = useState<string[]>(['^GSPC', '^NSEI']);
+  const [draftSegments, setDraftSegments] = useState<string[]>(['all']);
+
+  // For non-CUSTOM intervals, apply immediately; for CUSTOM, wait for Apply
+  const queryInterval = selectedInterval === 'CUSTOM' ? appliedInterval : selectedInterval;
+  const queryStartDate = queryInterval === 'CUSTOM' ? appliedDateRange.start : undefined;
+  const queryEndDate = queryInterval === 'CUSTOM' ? appliedDateRange.end : undefined;
 
   const { data: benchmarks } = useBenchmarks();
-  const { data: comparison, isLoading } = usePerformanceComparison(interval, selectedBenchmarks);
-  const { data: assetClassPerf } = usePerformanceByAssetClass(interval);
+  const { data: comparison, isLoading, isFetching } = usePerformanceComparison(
+    queryInterval, appliedBenchmarks, appliedSegments,
+    queryStartDate, queryEndDate
+  );
+  const { data: assetClassPerf } = usePerformanceByAssetClass(queryInterval === 'CUSTOM' ? 'ALL' : queryInterval);
   const { data: realizedGains } = useRealizedGainsTotal();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = usdInrRate?.rate ?? null;
   const backfillPrices = useBackfillPrices();
 
+  const hasDraftChanges =
+    JSON.stringify(draftBenchmarks.slice().sort()) !== JSON.stringify(appliedBenchmarks.slice().sort()) ||
+    JSON.stringify(draftSegments.slice().sort()) !== JSON.stringify(appliedSegments.slice().sort()) ||
+    (selectedInterval === 'CUSTOM' && (customStart !== (appliedDateRange.start ?? '') || customEnd !== (appliedDateRange.end ?? '')));
+
+  const handleIntervalChange = (value: TimeInterval) => {
+    setSelectedInterval(value);
+    if (value !== 'CUSTOM') {
+      setAppliedInterval(value);
+    }
+  };
+
+  const applySelection = () => {
+    setAppliedBenchmarks([...draftBenchmarks]);
+    setAppliedSegments([...draftSegments]);
+    if (selectedInterval === 'CUSTOM' && customStart) {
+      setAppliedDateRange({ start: customStart, end: customEnd || undefined });
+      setAppliedInterval('CUSTOM');
+    }
+  };
+
   const toggleBenchmark = (symbol: string) => {
-    setSelectedBenchmarks((prev) =>
+    setDraftBenchmarks((prev) =>
       prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol]
     );
+  };
+
+  const toggleSegment = (key: string) => {
+    if (key === 'all') {
+      setDraftSegments(['all']);
+      return;
+    }
+    setDraftSegments((prev) => {
+      const without = prev.filter((s) => s !== 'all' && s !== key);
+      if (prev.includes(key)) {
+        return without.length === 0 ? ['all'] : without;
+      }
+      return [...without, key];
+    });
   };
 
   if (isLoading) {
@@ -97,10 +172,10 @@ export default function Performance() {
           {TIME_INTERVALS.map((ti) => (
             <button
               key={ti.value}
-              onClick={() => setInterval(ti.value)}
+              onClick={() => handleIntervalChange(ti.value)}
               className={clsx(
                 'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                interval === ti.value
+                selectedInterval === ti.value
                   ? 'bg-brand-600 text-white'
                   : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
               )}
@@ -108,6 +183,73 @@ export default function Performance() {
               {ti.label}
             </button>
           ))}
+          {selectedInterval === 'CUSTOM' && (
+            <>
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500"
+              />
+              <span className="text-surface-500 text-sm">to</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500"
+              />
+            </>
+          )}
+        </div>
+      </Card>
+
+      {/* Segment & Benchmark Selector */}
+      <Card padding="sm">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-surface-500 font-medium mr-1 shrink-0">Segment:</span>
+            {PORTFOLIO_SEGMENTS.map((seg) => (
+              <button
+                key={seg.key}
+                onClick={() => toggleSegment(seg.key)}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                  draftSegments.includes(seg.key)
+                    ? 'bg-brand-600/30 border-brand-500/50 text-brand-300'
+                    : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50 border-transparent'
+                )}
+              >
+                {seg.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-surface-500 font-medium mr-1 shrink-0">Benchmark:</span>
+            {benchmarks?.map((benchmark) => (
+              <button
+                key={benchmark.id}
+                onClick={() => toggleBenchmark(benchmark.symbol)}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                  draftBenchmarks.includes(benchmark.symbol)
+                    ? 'bg-blue-600/30 border-blue-500/50 text-blue-300'
+                    : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50 border-transparent'
+                )}
+              >
+                {benchmark.name}
+              </button>
+            ))}
+          </div>
+          {hasDraftChanges && (
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={applySelection}
+                className="btn btn-primary text-xs px-4 py-1.5"
+              >
+                Apply
+              </button>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -165,6 +307,7 @@ export default function Performance() {
           <div>
             <h2 className="text-lg font-semibold text-surface-100">
               Performance Curve (NAV)
+              {isFetching && <span className="ml-2 text-xs text-surface-500 animate-pulse">Updating...</span>}
             </h2>
             <p className="text-xs text-surface-500 mt-0.5">
               Tracks pure investment returns — deposits &amp; withdrawals are excluded
@@ -172,7 +315,7 @@ export default function Performance() {
           </div>
           {comparison?.portfolio.annualizedReturn !== null && (
             <span className="text-sm text-surface-400">
-              Annualized: {formatPercent(comparison.portfolio.annualizedReturn)}
+              Annualized: {formatPercent(comparison?.portfolio.annualizedReturn ?? 0)}
             </span>
           )}
         </div>
@@ -203,7 +346,9 @@ export default function Performance() {
                   strokeWidth={2}
                   dot={false}
                 />
-                {comparison?.benchmarks.map((benchmark, idx) => (
+                {comparison?.benchmarks.map((benchmark, idx) => {
+                  const dashPatterns = [undefined, '6 3', '2 2', '8 4 2 4'];
+                  return (
                   <Line
                     key={benchmark.symbol}
                     type="monotone"
@@ -212,9 +357,10 @@ export default function Performance() {
                     stroke={CHART_COLORS[(idx + 1) % CHART_COLORS.length]}
                     strokeWidth={2}
                     dot={false}
-                    strokeDasharray={idx % 2 === 0 ? undefined : '5 5'}
+                    strokeDasharray={dashPatterns[idx % dashPatterns.length]}
                   />
-                ))}
+                  );
+                })}
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -227,95 +373,13 @@ export default function Performance() {
         )}
       </Card>
 
-      {/* Benchmark Selector */}
-      <Card>
-        <h2 className="text-lg font-semibold text-surface-100 mb-4">
-          Select Benchmarks to Compare
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {benchmarks?.map((benchmark) => (
-            <button
-              key={benchmark.id}
-              onClick={() => toggleBenchmark(benchmark.symbol)}
-              className={clsx(
-                'p-3 rounded-xl text-left transition-all border',
-                selectedBenchmarks.includes(benchmark.symbol)
-                  ? 'bg-brand-600/20 border-brand-500/50'
-                  : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600'
-              )}
-            >
-              <p className="font-medium text-surface-100 text-sm">{benchmark.name}</p>
-              <p className="text-xs text-surface-500">{benchmark.region}</p>
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      {/* Performance by Asset Class */}
-      <Card>
-        <h2 className="text-lg font-semibold text-surface-100 mb-6">
-          Performance by Asset Class
-        </h2>
-        {assetClassPerf && assetClassPerf.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-surface-700">
-                  <th className="table-header">Asset Class</th>
-                  <th className="table-header text-right">Holdings</th>
-                  <th className="table-header text-right">Total Value</th>
-                  <th className="table-header text-right">P&L %</th>
-                  <th className="table-header text-right">Realized P&L</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800">
-                {assetClassPerf.map((item) => (
-                  <tr key={item.assetClass} className="hover:bg-surface-800/30">
-                    <td className="table-cell">
-                      <AssetClassBadge assetClass={item.assetClass} />
-                    </td>
-                    <td className="table-cell text-right tabular-nums">
-                      {item.holdings}
-                    </td>
-                    <td className="table-cell text-right tabular-nums">
-                      {formatCurrency(item.currentValue, 'INR')}
-                    </td>
-                    <td
-                      className={clsx(
-                        'table-cell text-right tabular-nums font-medium',
-                        item.performance.percentageReturn >= 0
-                          ? 'text-green-400'
-                          : 'text-red-400'
-                      )}
-                    >
-                      {item.performance.percentageReturn >= 0 ? '+' : ''}
-                      {formatPercent(item.performance.percentageReturn)}
-                    </td>
-                    <td
-                      className={clsx(
-                        'table-cell text-right tabular-nums',
-                        item.performance.realizedGains >= 0
-                          ? 'text-green-400'
-                          : 'text-red-400'
-                      )}
-                    >
-                      {formatCurrency(item.performance.realizedGains, 'INR')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-surface-500 text-center py-8">No asset class data</p>
-        )}
-      </Card>
-
       {/* Benchmark Performance Table */}
       {comparison && comparison.benchmarks.length > 0 && (
         <Card>
           <h2 className="text-lg font-semibold text-surface-100 mb-6">
-            Benchmark Returns ({interval})
+            Benchmark Returns ({selectedInterval === 'CUSTOM' && appliedDateRange.start
+              ? `${appliedDateRange.start} to ${appliedDateRange.end || 'now'}`
+              : queryInterval})
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -380,6 +444,66 @@ export default function Performance() {
           </div>
         </Card>
       )}
+
+      {/* Performance by Asset Class */}
+      <Card>
+        <h2 className="text-lg font-semibold text-surface-100 mb-6">
+          Performance by Asset Class
+        </h2>
+        {assetClassPerf && assetClassPerf.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-surface-700">
+                  <th className="table-header">Asset Class</th>
+                  <th className="table-header text-right">Holdings</th>
+                  <th className="table-header text-right">Total Value</th>
+                  <th className="table-header text-right">P&L %</th>
+                  <th className="table-header text-right">Realized P&L</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800">
+                {assetClassPerf.map((item) => (
+                  <tr key={item.assetClass} className="hover:bg-surface-800/30">
+                    <td className="table-cell">
+                      <AssetClassBadge assetClass={item.assetClass} />
+                    </td>
+                    <td className="table-cell text-right tabular-nums">
+                      {item.holdings}
+                    </td>
+                    <td className="table-cell text-right tabular-nums">
+                      {formatCurrency(item.currentValue, 'INR')}
+                    </td>
+                    <td
+                      className={clsx(
+                        'table-cell text-right tabular-nums font-medium',
+                        item.performance.percentageReturn >= 0
+                          ? 'text-green-400'
+                          : 'text-red-400'
+                      )}
+                    >
+                      {item.performance.percentageReturn >= 0 ? '+' : ''}
+                      {formatPercent(item.performance.percentageReturn)}
+                    </td>
+                    <td
+                      className={clsx(
+                        'table-cell text-right tabular-nums',
+                        item.performance.realizedGains >= 0
+                          ? 'text-green-400'
+                          : 'text-red-400'
+                      )}
+                    >
+                      {formatCurrency(item.performance.realizedGains, 'INR')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-surface-500 text-center py-8">No asset class data</p>
+        )}
+      </Card>
       </div>
     </div>
   );

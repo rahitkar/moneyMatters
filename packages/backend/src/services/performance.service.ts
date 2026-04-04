@@ -9,6 +9,30 @@ import type { TimeInterval, AssetClass, PortfolioSnapshot } from '../db/schema.j
 const PHYSICAL_METAL_CLASSES = new Set<string>(['gold_physical', 'silver_physical']);
 const METAL_SELL_FACTOR = 0.95;
 
+// Portfolio segments for filtered comparison
+export interface SegmentFilter {
+  assetClasses?: string[];
+  currencyIs?: string;    // exact match
+  currencyNot?: string;   // exclude match
+}
+
+export const PORTFOLIO_SEGMENTS: Record<string, { label: string; filters: SegmentFilter[] }> = {
+  all:                  { label: 'Total Portfolio', filters: [] },
+  indian_stocks:        { label: 'Indian Stocks', filters: [{ assetClasses: ['stocks'], currencyIs: 'INR' }] },
+  international_stocks: { label: "Int'l Stocks", filters: [{ assetClasses: ['stocks'], currencyNot: 'INR' }] },
+  equity_mf:            { label: 'Equity MF', filters: [{ assetClasses: ['mutual_fund_equity'] }] },
+  debt_mf:              { label: 'Debt MF', filters: [{ assetClasses: ['mutual_fund_debt'] }] },
+  indian_etf:           { label: 'Indian ETF', filters: [{ assetClasses: ['etf'], currencyIs: 'INR' }] },
+  international_etf:    { label: "Int'l ETF", filters: [{ assetClasses: ['etf'], currencyNot: 'INR' }] },
+  crypto:               { label: 'Crypto', filters: [{ assetClasses: ['crypto'] }] },
+  gold:                 { label: 'Gold', filters: [{ assetClasses: ['gold', 'gold_physical'] }] },
+  all_equity:           { label: 'All Equity', filters: [
+    { assetClasses: ['stocks'] },
+    { assetClasses: ['mutual_fund_equity'] },
+    { assetClasses: ['etf'] },
+  ]},
+};
+
 function toInr(value: number, currency: string, usdToInr: number | null): number {
   if (currency === 'INR') return value;
   if (currency === 'USD' && usdToInr) return value * usdToInr;
@@ -57,8 +81,8 @@ export interface TagPerformance {
   currentValue: number;
 }
 
-// Calculate start date based on interval
-function getStartDate(interval: TimeInterval): Date {
+// Calculate start date based on interval. For ALL/CUSTOM, returns null (caller resolves from data or explicit dates).
+function getStartDate(interval: TimeInterval): Date | null {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   
@@ -78,10 +102,28 @@ function getStartDate(interval: TimeInterval): Date {
     case 'YTD':
       return new Date(now.getFullYear(), 0, 1);
     case 'ALL':
-      return new Date(2000, 0, 1);
+    case 'CUSTOM':
+      return null;
     default:
       return new Date(now.setMonth(now.getMonth() - 1));
   }
+}
+
+async function getFirstTransactionDate(allowedAssetIds?: Set<string>): Promise<string | null> {
+  if (!allowedAssetIds) {
+    const row = await db
+      .select({ minDate: sql<string>`MIN(${schema.transactions.transactionDate})` })
+      .from(schema.transactions)
+      .then((r) => r[0]);
+    return row?.minDate ?? null;
+  }
+  const rows = await db
+    .select({ date: schema.transactions.transactionDate, assetId: schema.transactions.assetId })
+    .from(schema.transactions)
+    .orderBy(asc(schema.transactions.transactionDate))
+    .all();
+  const first = rows.find((r) => allowedAssetIds.has(r.assetId));
+  return first?.date ?? null;
 }
 
 // Calculate days between dates
@@ -142,14 +184,43 @@ function getPriceAtDate(timeline: { date: string; price: number }[], targetDate:
 
 const BASE_NAV = 1000;
 
+async function resolveSegmentAssetIds(segments: string[]): Promise<Set<string> | undefined> {
+  if (segments.length === 0 || segments.includes('all')) return undefined;
+
+  const allAssets = await db.select({
+    id: schema.assets.id,
+    assetClass: schema.assets.assetClass,
+    currency: schema.assets.currency,
+  }).from(schema.assets).all();
+
+  const ids = new Set<string>();
+  for (const seg of segments) {
+    const def = PORTFOLIO_SEGMENTS[seg];
+    if (!def || def.filters.length === 0) continue;
+    for (const filter of def.filters) {
+      for (const asset of allAssets) {
+        if (filter.assetClasses && !filter.assetClasses.includes(asset.assetClass)) continue;
+        if (filter.currencyIs && (asset.currency || 'INR') !== filter.currencyIs) continue;
+        if (filter.currencyNot && (asset.currency || 'INR') === filter.currencyNot) continue;
+        ids.add(asset.id);
+      }
+    }
+  }
+  return ids;
+}
+
 export const performanceService = {
   // Load all transaction and price data needed for history calculations
-  async _loadPriceTimelines(endDateStr: string) {
-    const transactions = await db
+  async _loadPriceTimelines(endDateStr: string, allowedAssetIds?: Set<string>) {
+    let transactions = await db
       .select()
       .from(schema.transactions)
       .orderBy(asc(schema.transactions.transactionDate))
       .all();
+
+    if (allowedAssetIds) {
+      transactions = transactions.filter((tx) => allowedAssetIds.has(tx.assetId));
+    }
 
     const assets = await db.select().from(schema.assets).all();
     const currentPrices = new Map(assets.map((a) => [a.id, a.currentPrice ?? 0]));
@@ -175,10 +246,14 @@ export const performanceService = {
       priceTimeline.get(ph.assetId)!.push({ date: dateStr, price: ph.price });
     }
 
-    for (const [assetId, price] of currentPrices) {
-      if (price > 0) {
-        if (!priceTimeline.has(assetId)) priceTimeline.set(assetId, []);
-        priceTimeline.get(assetId)!.push({ date: endDateStr, price });
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isLiveEnd = endDateStr >= todayStr;
+    if (isLiveEnd) {
+      for (const [assetId, price] of currentPrices) {
+        if (price > 0) {
+          if (!priceTimeline.has(assetId)) priceTimeline.set(assetId, []);
+          priceTimeline.get(assetId)!.push({ date: endDateStr, price });
+        }
       }
     }
 
@@ -230,7 +305,8 @@ export const performanceService = {
   async buildHistories(
     startDateStr: string,
     endDateStr: string,
-    interval: TimeInterval
+    interval: TimeInterval,
+    allowedAssetIds?: Set<string>
   ): Promise<{
     navHistory: { date: string; nav: number }[];
     valueHistory: { date: string; value: number }[];
@@ -238,7 +314,7 @@ export const performanceService = {
     currentNAV: number;
   }> {
     const { transactions, priceTimeline, currencyMap, assetClassMap } =
-      await this._loadPriceTimelines(endDateStr);
+      await this._loadPriceTimelines(endDateStr, allowedAssetIds);
 
     if (transactions.length === 0) {
       return { navHistory: [], valueHistory: [], units: 0, currentNAV: BASE_NAV };
@@ -247,25 +323,85 @@ export const performanceService = {
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
-    const sampleDates = generateSampleDates(startDateStr, endDateStr, interval);
-    const navHistory: { date: string; nav: number }[] = [];
-    const valueHistory: { date: string; value: number }[] = [];
+    const firstTxDate = transactions[0].transactionDate;
+    const includesInception = startDateStr <= firstTxDate;
+
+    // Phase 1: replay all transactions BEFORE the interval to build up
+    // correct positions, units, and NAV state without recording history
     const positions = new Map<string, number>();
     let units = 0;
     let nav = BASE_NAV;
     let txIdx = 0;
 
-    for (const sampleDate of sampleDates) {
-      while (txIdx < transactions.length && transactions[txIdx].transactionDate <= sampleDate) {
-        const tx = transactions[txIdx];
+    while (txIdx < transactions.length && transactions[txIdx].transactionDate < startDateStr) {
+      const tx = transactions[txIdx];
+      const preValue = this._calcPortfolioValue(
+        positions, priceTimeline, tx.transactionDate,
+        currencyMap, assetClassMap, usdToInr
+      );
+      if (units > 0 && preValue > 0) nav = preValue / units;
 
+      const cur = currencyMap.get(tx.assetId) ?? 'INR';
+      const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+      if (tx.type === 'buy') {
+        if (units === 0) nav = BASE_NAV;
+        units += txAmountInr / nav;
+        positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) + tx.quantity);
+      } else {
+        if (nav > 0) units = Math.max(0, units - txAmountInr / nav);
+        positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) - tx.quantity);
+      }
+      txIdx++;
+    }
+
+    // Phase 2: generate sample dates and record history within the interval
+    const effectiveStart = includesInception ? firstTxDate : startDateStr;
+    const sampleDates = generateSampleDates(effectiveStart, endDateStr, interval);
+
+    const navHistory: { date: string; nav: number }[] = [];
+    const valueHistory: { date: string; value: number }[] = [];
+
+    // For ALL interval, record inception at NAV=1000
+    if (includesInception && sampleDates[0] === firstTxDate) {
+      // Process transactions on the first tx date, then record inception
+      while (txIdx < transactions.length && transactions[txIdx].transactionDate <= firstTxDate) {
+        const tx = transactions[txIdx];
         const preValue = this._calcPortfolioValue(
           positions, priceTimeline, tx.transactionDate,
           currencyMap, assetClassMap, usdToInr
         );
-        if (units > 0 && preValue > 0) {
-          nav = preValue / units;
+        if (units > 0 && preValue > 0) nav = preValue / units;
+
+        const cur = currencyMap.get(tx.assetId) ?? 'INR';
+        const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+        if (tx.type === 'buy') {
+          if (units === 0) nav = BASE_NAV;
+          units += txAmountInr / nav;
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) + tx.quantity);
+        } else {
+          if (nav > 0) units = Math.max(0, units - txAmountInr / nav);
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) - tx.quantity);
         }
+        txIdx++;
+      }
+      const costValue = units * BASE_NAV;
+      navHistory.push({ date: firstTxDate, nav: BASE_NAV });
+      valueHistory.push({ date: firstTxDate, value: costValue });
+    }
+
+    for (const sampleDate of sampleDates) {
+      // Skip inception date if already recorded
+      if (navHistory.length > 0 && navHistory[0].date === sampleDate && sampleDate === firstTxDate) {
+        continue;
+      }
+
+      while (txIdx < transactions.length && transactions[txIdx].transactionDate <= sampleDate) {
+        const tx = transactions[txIdx];
+        const preValue = this._calcPortfolioValue(
+          positions, priceTimeline, tx.transactionDate,
+          currencyMap, assetClassMap, usdToInr
+        );
+        if (units > 0 && preValue > 0) nav = preValue / units;
 
         const cur = currencyMap.get(tx.assetId) ?? 'INR';
         const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
@@ -300,16 +436,32 @@ export const performanceService = {
   },
 
   // Get portfolio performance for a given interval
-  async getPortfolioPerformance(interval: TimeInterval): Promise<PortfolioPerformance> {
-    const startDate = getStartDate(interval);
-    const endDate = new Date();
-    const startDateStr = startDate.toISOString().split('T')[0];
+  async getPortfolioPerformance(
+    interval: TimeInterval,
+    allowedAssetIds?: Set<string>,
+    customStart?: string,
+    customEnd?: string
+  ): Promise<PortfolioPerformance> {
+    const endDate = customEnd ? new Date(customEnd) : new Date();
     const endDateStr = endDate.toISOString().split('T')[0];
+
+    let startDate: Date | null = customStart ? new Date(customStart) : getStartDate(interval);
+    if (!startDate) {
+      const firstTxDate = await getFirstTransactionDate(allowedAssetIds);
+      startDate = firstTxDate ? new Date(firstTxDate) : new Date();
+    }
+    const startDateStr = startDate.toISOString().split('T')[0];
 
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
-    const positions = await transactionService.getAllPositions();
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isLive = endDateStr >= todayStr;
+
+    let positions = await transactionService.getAllPositions();
+    if (allowedAssetIds) {
+      positions = positions.filter((p) => allowedAssetIds.has(p.assetId));
+    }
     let currentValue = 0;
     let currentCost = 0;
     let unrealizedGains = 0;
@@ -324,20 +476,28 @@ export const performanceService = {
 
     // Build both NAV and raw-value histories in a single pass
     const { navHistory, valueHistory, units: totalUnits, currentNAV } =
-      await this.buildHistories(startDateStr, endDateStr, interval);
+      await this.buildHistories(startDateStr, endDateStr, interval, allowedAssetIds);
 
-    // Ensure the final points use live current values
-    const liveNAV = totalUnits > 0 ? currentValue / totalUnits : currentNAV;
-    if (navHistory.length > 0 && navHistory[navHistory.length - 1].date === endDateStr) {
-      navHistory[navHistory.length - 1].nav = liveNAV;
-    } else if (totalUnits > 0) {
-      navHistory.push({ date: endDateStr, nav: liveNAV });
-    }
+    let finalNAV = currentNAV;
+    let finalValue = currentValue;
 
-    if (valueHistory.length > 0 && valueHistory[valueHistory.length - 1].date === endDateStr) {
-      valueHistory[valueHistory.length - 1].value = currentValue;
+    if (isLive) {
+      // Patch last points with live current values
+      finalNAV = totalUnits > 0 ? currentValue / totalUnits : currentNAV;
+      if (navHistory.length > 0 && navHistory[navHistory.length - 1].date === endDateStr) {
+        navHistory[navHistory.length - 1].nav = finalNAV;
+      } else if (totalUnits > 0) {
+        navHistory.push({ date: endDateStr, nav: finalNAV });
+      }
+      if (valueHistory.length > 0 && valueHistory[valueHistory.length - 1].date === endDateStr) {
+        valueHistory[valueHistory.length - 1].value = currentValue;
+      } else {
+        valueHistory.push({ date: endDateStr, value: currentValue });
+      }
     } else {
-      valueHistory.push({ date: endDateStr, value: currentValue });
+      // Historical end date: derive values from the history
+      finalNAV = navHistory.length > 0 ? navHistory[navHistory.length - 1].nav : BASE_NAV;
+      finalValue = valueHistory.length > 0 ? valueHistory[valueHistory.length - 1].value : 0;
     }
 
     // NAV-based returns (pure investment performance)
@@ -346,21 +506,25 @@ export const performanceService = {
     const navReturn = startNAV > 0 ? ((endNAV - startNAV) / startNAV) * 100 : 0;
     const days = daysBetween(startDate, endDate);
 
+    const absoluteReturn = isLive
+      ? unrealizedGains + realizedGains
+      : finalValue - currentCost;
+
     return {
       interval,
       startDate: startDateStr,
       endDate: endDateStr,
       startValue: currentCost,
-      endValue: currentValue,
-      absoluteReturn: unrealizedGains + realizedGains,
+      endValue: finalValue,
+      absoluteReturn,
       percentageReturn: navReturn,
       annualizedReturn: calculateAnnualizedReturn(navReturn, days),
       totalCost: currentCost,
       realizedGains,
-      unrealizedGains,
+      unrealizedGains: isLive ? unrealizedGains : finalValue - currentCost,
       valueHistory,
       navHistory,
-      currentNAV: liveNAV,
+      currentNAV: finalNAV,
       totalUnits,
     };
   },
@@ -403,7 +567,7 @@ export const performanceService = {
         .where(
           and(
             eq(schema.priceHistory.assetId, assetId),
-            lte(sql`date(${schema.priceHistory.recordedAt} / 1000, 'unixepoch')`, dateStr)
+            lte(sql`date(${schema.priceHistory.recordedAt}, 'unixepoch')`, dateStr)
           )
         )
         .orderBy(desc(schema.priceHistory.recordedAt))
@@ -429,12 +593,18 @@ export const performanceService = {
   // Compare portfolio performance with benchmarks
   async compareWithBenchmarks(
     interval: TimeInterval,
-    benchmarkSymbols: string[]
+    benchmarkSymbols: string[],
+    segments?: string[],
+    customStart?: string,
+    customEnd?: string
   ): Promise<PerformanceComparison> {
-    const portfolio = await this.getPortfolioPerformance(interval);
+    const allowedAssetIds = segments ? await resolveSegmentAssetIds(segments) : undefined;
+    const portfolio = await this.getPortfolioPerformance(interval, allowedAssetIds, customStart, customEnd);
     const benchmarks = await benchmarkService.getMultiplePerformance(
       benchmarkSymbols,
-      interval
+      interval,
+      portfolio.startDate,
+      interval === 'CUSTOM' ? portfolio.endDate : undefined
     );
 
     return { portfolio, benchmarks };
@@ -445,7 +615,11 @@ export const performanceService = {
     interval: TimeInterval
   ): Promise<AssetClassPerformance[]> {
     const positions = await transactionService.getAllPositions();
-    const startDate = getStartDate(interval);
+    let startDate = getStartDate(interval);
+    if (!startDate) {
+      const firstTxDate = await getFirstTransactionDate();
+      startDate = firstTxDate ? new Date(firstTxDate) : new Date();
+    }
     const startDateStr = startDate.toISOString().split('T')[0];
 
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
@@ -551,7 +725,7 @@ export const performanceService = {
       .where(
         and(
           eq(schema.priceHistory.assetId, assetId),
-          lte(sql`date(${schema.priceHistory.recordedAt} / 1000, 'unixepoch')`, dateStr)
+          lte(sql`date(${schema.priceHistory.recordedAt}, 'unixepoch')`, dateStr)
         )
       )
       .orderBy(desc(schema.priceHistory.recordedAt))
@@ -609,7 +783,11 @@ export const performanceService = {
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
-    const startDate = getStartDate(interval);
+    let startDate = getStartDate(interval);
+    if (!startDate) {
+      const firstTxDate = await getFirstTransactionDate();
+      startDate = firstTxDate ? new Date(firstTxDate) : new Date();
+    }
     const startDateStr = startDate.toISOString().split('T')[0];
 
     let startValue = 0;
@@ -708,7 +886,11 @@ export const performanceService = {
 
   // Get all snapshots for charting
   async getSnapshots(interval: TimeInterval): Promise<PortfolioSnapshot[]> {
-    const startDate = getStartDate(interval);
+    let startDate = getStartDate(interval);
+    if (!startDate) {
+      const firstTxDate = await getFirstTransactionDate();
+      startDate = firstTxDate ? new Date(firstTxDate) : new Date();
+    }
     const startDateStr = startDate.toISOString().split('T')[0];
 
     return db

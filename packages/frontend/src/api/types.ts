@@ -144,7 +144,7 @@ export interface SearchResult {
 
 // Transaction types
 export type TransactionType = 'buy' | 'sell';
-export type TimeInterval = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | 'YTD' | 'ALL';
+export type TimeInterval = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | 'YTD' | 'ALL' | 'CUSTOM';
 
 export interface Transaction {
   id: string;

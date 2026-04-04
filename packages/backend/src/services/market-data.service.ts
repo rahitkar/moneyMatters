@@ -385,7 +385,7 @@ export const marketDataService = {
         // Batch-load existing dates for this asset
         const existingDates = new Set(
           (await db
-            .select({ d: sql<string>`date(${schema.priceHistory.recordedAt} / 1000, 'unixepoch')` })
+            .select({ d: sql<string>`date(${schema.priceHistory.recordedAt}, 'unixepoch')` })
             .from(schema.priceHistory)
             .where(eq(schema.priceHistory.assetId, asset.id))
             .all()

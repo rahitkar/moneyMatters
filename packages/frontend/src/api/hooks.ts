@@ -51,8 +51,8 @@ export const queryKeys = {
   realizedGains: ['realized-gains'] as const,
   // Performance
   performance: (interval: TimeInterval) => ['performance', interval] as const,
-  performanceComparison: (interval: TimeInterval, benchmarks: string[]) =>
-    ['performance', 'compare', interval, benchmarks] as const,
+  performanceComparison: (interval: TimeInterval, benchmarks: string[], segments: string[], startDate?: string, endDate?: string) =>
+    ['performance', 'compare', interval, benchmarks, segments, startDate, endDate] as const,
   performanceByAssetClass: (interval: TimeInterval) =>
     ['performance', 'by-asset-class', interval] as const,
   performanceByTag: (tagId: string, interval: TimeInterval) =>
@@ -546,15 +546,29 @@ export function usePortfolioPerformance(interval: TimeInterval = '1M') {
   });
 }
 
-export function usePerformanceComparison(interval: TimeInterval = '1M', benchmarks: string[] = ['^GSPC', '^NSEI']) {
+export function usePerformanceComparison(
+  interval: TimeInterval = '1M',
+  benchmarks: string[] = ['^GSPC', '^NSEI'],
+  segments: string[] = ['all'],
+  startDate?: string,
+  endDate?: string
+) {
   return useQuery({
-    queryKey: queryKeys.performanceComparison(interval, benchmarks),
-    queryFn: () =>
-      api
+    queryKey: queryKeys.performanceComparison(interval, benchmarks, segments, startDate, endDate),
+    queryFn: () => {
+      const params = new URLSearchParams({ interval, benchmarks: benchmarks.join(',') });
+      if (segments.length > 0 && !segments.includes('all')) {
+        params.set('segment', segments.join(','));
+      }
+      if (interval === 'CUSTOM' && startDate) params.set('startDate', startDate);
+      if (interval === 'CUSTOM' && endDate) params.set('endDate', endDate);
+      return api
         .get<{ comparison: PerformanceComparison }>(
-          `/performance/compare?interval=${interval}&benchmarks=${benchmarks.join(',')}`
+          `/performance/compare?${params.toString()}`
         )
-        .then((r) => r.comparison),
+        .then((r) => r.comparison);
+    },
+    enabled: interval !== 'CUSTOM' || !!startDate,
   });
 }
 

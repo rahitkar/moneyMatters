@@ -8,7 +8,10 @@ const intervalSchema = z.enum(TIME_INTERVALS).optional().default('1M');
 
 const compareSchema = z.object({
   interval: z.enum(TIME_INTERVALS).optional().default('1M'),
-  benchmarks: z.string().optional(), // Comma-separated symbols
+  benchmarks: z.string().optional(),
+  segment: z.string().optional(),
+  startDate: z.string().optional(), // ISO date (YYYY-MM-DD) for CUSTOM interval
+  endDate: z.string().optional(),   // ISO date (YYYY-MM-DD) for CUSTOM interval
 });
 
 export async function performanceRoutes(fastify: FastifyInstance) {
@@ -23,19 +26,26 @@ export async function performanceRoutes(fastify: FastifyInstance) {
   );
 
   // Compare portfolio with benchmarks
-  fastify.get<{ Querystring: { interval?: string; benchmarks?: string } }>(
+  fastify.get<{ Querystring: { interval?: string; benchmarks?: string; segment?: string; startDate?: string; endDate?: string } }>(
     '/compare',
     async (request) => {
-      const { interval, benchmarks } = compareSchema.parse(request.query);
+      const { interval, benchmarks, segment, startDate, endDate } = compareSchema.parse(request.query);
       
       // Default to S&P 500 and Nifty if no benchmarks specified
       const benchmarkSymbols = benchmarks
         ? benchmarks.split(',').map((s) => s.trim())
         : ['^GSPC', '^NSEI'];
 
+      const segments = segment
+        ? segment.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined;
+
       const comparison = await performanceService.compareWithBenchmarks(
         interval,
-        benchmarkSymbols
+        benchmarkSymbols,
+        segments,
+        interval === 'CUSTOM' ? startDate : undefined,
+        interval === 'CUSTOM' ? endDate : undefined
       );
       return { comparison };
     }

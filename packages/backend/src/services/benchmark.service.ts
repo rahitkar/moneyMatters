@@ -1,4 +1,4 @@
-import { eq, and, gte, desc, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import { yahooFinanceProvider } from '../providers/yahoo-finance.provider.js';
@@ -21,7 +21,10 @@ export interface BenchmarkPerformance {
 }
 
 // Calculate start date based on interval
-function getStartDate(interval: TimeInterval): Date {
+function getStartDate(interval: TimeInterval, overrideStartStr?: string): Date {
+  if ((interval === 'ALL' || interval === 'CUSTOM') && overrideStartStr) {
+    return new Date(overrideStartStr);
+  }
   const now = new Date();
   switch (interval) {
     case '1D':
@@ -39,7 +42,8 @@ function getStartDate(interval: TimeInterval): Date {
     case 'YTD':
       return new Date(now.getFullYear(), 0, 1);
     case 'ALL':
-      return new Date(2000, 0, 1); // Far enough back
+    case 'CUSTOM':
+      return new Date(2000, 0, 1);
     default:
       return new Date(now.setMonth(now.getMonth() - 1));
   }
@@ -176,10 +180,20 @@ export const benchmarkService = {
   // Get price history for a benchmark within an interval
   async getPriceHistory(
     benchmarkId: string,
-    interval: TimeInterval
+    interval: TimeInterval,
+    overrideStartStr?: string,
+    overrideEndStr?: string
   ): Promise<{ date: string; price: number }[]> {
-    const startDate = getStartDate(interval);
+    const startDate = getStartDate(interval, overrideStartStr);
     const startDateStr = startDate.toISOString().split('T')[0];
+
+    const conditions = [
+      eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
+      gte(schema.benchmarkPrices.recordedDate, startDateStr),
+    ];
+    if (overrideEndStr) {
+      conditions.push(lte(schema.benchmarkPrices.recordedDate, overrideEndStr));
+    }
 
     const prices = await db
       .select({
@@ -187,12 +201,7 @@ export const benchmarkService = {
         price: schema.benchmarkPrices.price,
       })
       .from(schema.benchmarkPrices)
-      .where(
-        and(
-          eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
-          gte(schema.benchmarkPrices.recordedDate, startDateStr)
-        )
-      )
+      .where(and(...conditions))
       .orderBy(schema.benchmarkPrices.recordedDate)
       .all();
 
@@ -202,12 +211,14 @@ export const benchmarkService = {
   // Get performance for a benchmark over an interval
   async getPerformance(
     symbol: string,
-    interval: TimeInterval
+    interval: TimeInterval,
+    overrideStartStr?: string,
+    overrideEndStr?: string
   ): Promise<BenchmarkPerformance | null> {
     const benchmark = await this.getBySymbol(symbol);
     if (!benchmark) return null;
 
-    const startDate = getStartDate(interval);
+    const startDate = getStartDate(interval, overrideStartStr);
 
     // Only fetch from Yahoo if latest stored price is stale (> 1 day old)
     const latestStored = await db
@@ -245,7 +256,7 @@ export const benchmarkService = {
       await this.fetchHistoricalPrices(benchmark.id, symbol, startDate, fetchEnd);
     }
 
-    const priceHistory = await this.getPriceHistory(benchmark.id, interval);
+    const priceHistory = await this.getPriceHistory(benchmark.id, interval, overrideStartStr, overrideEndStr);
 
     if (priceHistory.length < 2) {
       return null;
@@ -271,12 +282,14 @@ export const benchmarkService = {
   // Get performance for multiple benchmarks
   async getMultiplePerformance(
     symbols: string[],
-    interval: TimeInterval
+    interval: TimeInterval,
+    overrideStartStr?: string,
+    overrideEndStr?: string
   ): Promise<BenchmarkPerformance[]> {
     const results: BenchmarkPerformance[] = [];
 
     for (const symbol of symbols) {
-      const perf = await this.getPerformance(symbol, interval);
+      const perf = await this.getPerformance(symbol, interval, overrideStartStr, overrideEndStr);
       if (perf) {
         results.push(perf);
       }
