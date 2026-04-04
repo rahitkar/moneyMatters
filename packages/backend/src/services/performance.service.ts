@@ -3,7 +3,17 @@ import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import { transactionService } from './transaction.service.js';
 import { benchmarkService, type BenchmarkPerformance } from './benchmark.service.js';
+import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 import type { TimeInterval, AssetClass, PortfolioSnapshot } from '../db/schema.js';
+
+const PHYSICAL_METAL_CLASSES = new Set<string>(['gold_physical', 'silver_physical']);
+const METAL_SELL_FACTOR = 0.95;
+
+function toInr(value: number, currency: string, usdToInr: number | null): number {
+  if (currency === 'INR') return value;
+  if (currency === 'USD' && usdToInr) return value * usdToInr;
+  return value;
+}
 
 export interface PerformanceMetrics {
   startValue: number;
@@ -21,6 +31,9 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   startDate: string;
   endDate: string;
   valueHistory: { date: string; value: number }[];
+  navHistory: { date: string; nav: number }[];
+  currentNAV: number;
+  totalUnits: number;
 }
 
 export interface PerformanceComparison {
@@ -87,7 +100,205 @@ function calculateAnnualizedReturn(
   return (Math.pow(1 + percentageReturn / 100, 1 / years) - 1) * 100;
 }
 
+function generateSampleDates(startStr: string, endStr: string, interval: TimeInterval): string[] {
+  const dates: string[] = [];
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+
+  let stepDays: number;
+  switch (interval) {
+    case '1D': case '1W': case '1M': stepDays = 1; break;
+    case '3M': stepDays = 3; break;
+    case '6M': case '1Y': case 'YTD': stepDays = 7; break;
+    case 'ALL': stepDays = 14; break;
+    default: stepDays = 7;
+  }
+
+  const current = new Date(start);
+  while (current <= end) {
+    dates.push(current.toISOString().split('T')[0]);
+    current.setDate(current.getDate() + stepDays);
+  }
+
+  const endDateStr = end.toISOString().split('T')[0];
+  if (dates.length === 0 || dates[dates.length - 1] !== endDateStr) {
+    dates.push(endDateStr);
+  }
+
+  return dates;
+}
+
+function getPriceAtDate(timeline: { date: string; price: number }[], targetDate: string): number {
+  let best = 0;
+  for (const entry of timeline) {
+    if (entry.date <= targetDate) {
+      best = entry.price;
+    } else {
+      break;
+    }
+  }
+  return best;
+}
+
+const BASE_NAV = 1000;
+
 export const performanceService = {
+  // Load all transaction and price data needed for history calculations
+  async _loadPriceTimelines(endDateStr: string) {
+    const transactions = await db
+      .select()
+      .from(schema.transactions)
+      .orderBy(asc(schema.transactions.transactionDate))
+      .all();
+
+    const assets = await db.select().from(schema.assets).all();
+    const currentPrices = new Map(assets.map((a) => [a.id, a.currentPrice ?? 0]));
+    const currencyMap = new Map(assets.map((a) => [a.id, a.currency || 'INR']));
+    const assetClassMap = new Map(assets.map((a) => [a.id, a.assetClass]));
+
+    const priceHistoryRecords = await db
+      .select()
+      .from(schema.priceHistory)
+      .orderBy(asc(schema.priceHistory.recordedAt))
+      .all();
+
+    const priceTimeline = new Map<string, { date: string; price: number }[]>();
+
+    for (const tx of transactions) {
+      if (!priceTimeline.has(tx.assetId)) priceTimeline.set(tx.assetId, []);
+      priceTimeline.get(tx.assetId)!.push({ date: tx.transactionDate, price: tx.price });
+    }
+
+    for (const ph of priceHistoryRecords) {
+      const dateStr = new Date(ph.recordedAt.getTime()).toISOString().split('T')[0];
+      if (!priceTimeline.has(ph.assetId)) priceTimeline.set(ph.assetId, []);
+      priceTimeline.get(ph.assetId)!.push({ date: dateStr, price: ph.price });
+    }
+
+    for (const [assetId, price] of currentPrices) {
+      if (price > 0) {
+        if (!priceTimeline.has(assetId)) priceTimeline.set(assetId, []);
+        priceTimeline.get(assetId)!.push({ date: endDateStr, price });
+      }
+    }
+
+    for (const [assetId, timeline] of priceTimeline) {
+      const seen = new Map<string, number>();
+      for (const entry of timeline) {
+        seen.set(entry.date, entry.price);
+      }
+      priceTimeline.set(
+        assetId,
+        Array.from(seen, ([date, price]) => ({ date, price })).sort((a, b) => a.date.localeCompare(b.date))
+      );
+    }
+
+    return { transactions, priceTimeline, currentPrices, currencyMap, assetClassMap };
+  },
+
+  // Calculate portfolio value (in INR) from positions and price timelines at a given date
+  _calcPortfolioValue(
+    positions: Map<string, number>,
+    priceTimeline: Map<string, { date: string; price: number }[]>,
+    date: string,
+    currencyMap: Map<string, string>,
+    assetClassMap: Map<string, string>,
+    usdToInr: number | null
+  ): number {
+    let total = 0;
+    for (const [assetId, quantity] of positions) {
+      if (quantity <= 0) continue;
+      const price = getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
+      const cur = currencyMap.get(assetId) ?? 'INR';
+      let value = toInr(quantity * price, cur, usdToInr);
+      if (PHYSICAL_METAL_CLASSES.has(assetClassMap.get(assetId) ?? '')) {
+        value *= METAL_SELL_FACTOR;
+      }
+      total += value;
+    }
+    return total;
+  },
+
+  /**
+   * Build both NAV and raw-value histories in a single pass.
+   *
+   * NAV curve (mutual-fund style): deposits/withdrawals create/remove units at
+   * current NAV so the curve reflects pure investment performance.
+   *
+   * Value curve: absolute portfolio value including deposits — used by Dashboard.
+   */
+  async buildHistories(
+    startDateStr: string,
+    endDateStr: string,
+    interval: TimeInterval
+  ): Promise<{
+    navHistory: { date: string; nav: number }[];
+    valueHistory: { date: string; value: number }[];
+    units: number;
+    currentNAV: number;
+  }> {
+    const { transactions, priceTimeline, currencyMap, assetClassMap } =
+      await this._loadPriceTimelines(endDateStr);
+
+    if (transactions.length === 0) {
+      return { navHistory: [], valueHistory: [], units: 0, currentNAV: BASE_NAV };
+    }
+
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
+
+    const sampleDates = generateSampleDates(startDateStr, endDateStr, interval);
+    const navHistory: { date: string; nav: number }[] = [];
+    const valueHistory: { date: string; value: number }[] = [];
+    const positions = new Map<string, number>();
+    let units = 0;
+    let nav = BASE_NAV;
+    let txIdx = 0;
+
+    for (const sampleDate of sampleDates) {
+      while (txIdx < transactions.length && transactions[txIdx].transactionDate <= sampleDate) {
+        const tx = transactions[txIdx];
+
+        const preValue = this._calcPortfolioValue(
+          positions, priceTimeline, tx.transactionDate,
+          currencyMap, assetClassMap, usdToInr
+        );
+        if (units > 0 && preValue > 0) {
+          nav = preValue / units;
+        }
+
+        const cur = currencyMap.get(tx.assetId) ?? 'INR';
+        const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+        if (tx.type === 'buy') {
+          if (units === 0) nav = BASE_NAV;
+          units += txAmountInr / nav;
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) + tx.quantity);
+        } else {
+          if (nav > 0) units = Math.max(0, units - txAmountInr / nav);
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) - tx.quantity);
+        }
+        txIdx++;
+      }
+
+      const portfolioValue = this._calcPortfolioValue(
+        positions, priceTimeline, sampleDate,
+        currencyMap, assetClassMap, usdToInr
+      );
+      if (units > 0 && portfolioValue > 0) {
+        nav = portfolioValue / units;
+      }
+
+      if (units > 0) {
+        navHistory.push({ date: sampleDate, nav });
+      }
+      if (portfolioValue > 0) {
+        valueHistory.push({ date: sampleDate, value: portfolioValue });
+      }
+    }
+
+    return { navHistory, valueHistory, units, currentNAV: nav };
+  },
+
   // Get portfolio performance for a given interval
   async getPortfolioPerformance(interval: TimeInterval): Promise<PortfolioPerformance> {
     const startDate = getStartDate(interval);
@@ -95,59 +306,62 @@ export const performanceService = {
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
 
-    // Get current portfolio value
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
+
     const positions = await transactionService.getAllPositions();
-    const currentValue = positions.reduce((sum, p) => sum + p.currentValue, 0);
-    const currentCost = positions.reduce((sum, p) => sum + p.totalCost, 0);
-    const unrealizedGains = positions.reduce((sum, p) => sum + p.unrealizedGain, 0);
+    let currentValue = 0;
+    let currentCost = 0;
+    let unrealizedGains = 0;
+    for (const p of positions) {
+      const cur = p.currency || 'INR';
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(p.assetClass) ? METAL_SELL_FACTOR : 1;
+      currentValue += toInr(p.currentValue, cur, usdToInr) * metalAdj;
+      currentCost += toInr(p.totalCost, cur, usdToInr);
+      unrealizedGains += toInr(p.unrealizedGain, cur, usdToInr) * metalAdj;
+    }
     const realizedGains = await transactionService.getTotalRealizedGains();
 
-    // Get historical snapshots for the period
-    const snapshots = await db
-      .select()
-      .from(schema.portfolioSnapshots)
-      .where(gte(schema.portfolioSnapshots.snapshotDate, startDateStr))
-      .orderBy(asc(schema.portfolioSnapshots.snapshotDate))
-      .all();
+    // Build both NAV and raw-value histories in a single pass
+    const { navHistory, valueHistory, units: totalUnits, currentNAV } =
+      await this.buildHistories(startDateStr, endDateStr, interval);
 
-    // Build value history
-    const valueHistory: { date: string; value: number }[] = snapshots.map((s) => ({
-      date: s.snapshotDate,
-      value: s.totalValue,
-    }));
+    // Ensure the final points use live current values
+    const liveNAV = totalUnits > 0 ? currentValue / totalUnits : currentNAV;
+    if (navHistory.length > 0 && navHistory[navHistory.length - 1].date === endDateStr) {
+      navHistory[navHistory.length - 1].nav = liveNAV;
+    } else if (totalUnits > 0) {
+      navHistory.push({ date: endDateStr, nav: liveNAV });
+    }
 
-    // Add current value if not already in snapshots
-    if (valueHistory.length === 0 || valueHistory[valueHistory.length - 1].date !== endDateStr) {
+    if (valueHistory.length > 0 && valueHistory[valueHistory.length - 1].date === endDateStr) {
+      valueHistory[valueHistory.length - 1].value = currentValue;
+    } else {
       valueHistory.push({ date: endDateStr, value: currentValue });
     }
 
-    // Get start value (from snapshot or estimate from transactions)
-    let startValue = snapshots.length > 0 ? snapshots[0].totalValue : 0;
-    
-    // If no snapshots, estimate from transactions before start date
-    if (startValue === 0) {
-      startValue = await this.estimatePortfolioValueAtDate(startDateStr);
-    }
-
-    // Calculate returns
-    const absoluteReturn = currentValue - startValue;
-    const percentageReturn = startValue > 0 ? (absoluteReturn / startValue) * 100 : 0;
+    // NAV-based returns (pure investment performance)
+    const startNAV = navHistory.length > 0 ? navHistory[0].nav : BASE_NAV;
+    const endNAV = navHistory.length > 0 ? navHistory[navHistory.length - 1].nav : BASE_NAV;
+    const navReturn = startNAV > 0 ? ((endNAV - startNAV) / startNAV) * 100 : 0;
     const days = daysBetween(startDate, endDate);
-    const annualizedReturn = calculateAnnualizedReturn(percentageReturn, days);
 
     return {
       interval,
       startDate: startDateStr,
       endDate: endDateStr,
-      startValue,
+      startValue: currentCost,
       endValue: currentValue,
-      absoluteReturn,
-      percentageReturn,
-      annualizedReturn,
+      absoluteReturn: unrealizedGains + realizedGains,
+      percentageReturn: navReturn,
+      annualizedReturn: calculateAnnualizedReturn(navReturn, days),
       totalCost: currentCost,
       realizedGains,
       unrealizedGains,
       valueHistory,
+      navHistory,
+      currentNAV: liveNAV,
+      totalUnits,
     };
   },
 
@@ -234,7 +448,9 @@ export const performanceService = {
     const startDate = getStartDate(interval);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    // Group positions by asset class
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
+
     const byClass = new Map<
       AssetClass,
       { positions: typeof positions; currentValue: number; totalCost: number }
@@ -242,28 +458,31 @@ export const performanceService = {
 
     for (const position of positions) {
       const assetClass = position.assetClass as AssetClass;
+      const cur = position.currency || 'INR';
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
       const existing = byClass.get(assetClass) || {
         positions: [],
         currentValue: 0,
         totalCost: 0,
       };
       existing.positions.push(position);
-      existing.currentValue += position.currentValue;
-      existing.totalCost += position.totalCost;
+      existing.currentValue += toInr(position.currentValue, cur, usdToInr) * metalAdj;
+      existing.totalCost += toInr(position.totalCost, cur, usdToInr);
       byClass.set(assetClass, existing);
     }
 
     const results: AssetClassPerformance[] = [];
 
     for (const [assetClass, data] of byClass) {
-      // Estimate start value for this asset class
       let startValue = 0;
       for (const position of data.positions) {
+        const cur = position.currency || 'INR';
+        const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
         const historicalValue = await this.estimateAssetValueAtDate(
           position.assetId,
           startDateStr
         );
-        startValue += historicalValue;
+        startValue += toInr(historicalValue, cur, usdToInr) * metalAdj;
       }
 
       const endValue = data.currentValue;
@@ -271,10 +490,13 @@ export const performanceService = {
       const percentageReturn = startValue > 0 ? (absoluteReturn / startValue) * 100 : 0;
       const days = daysBetween(startDate, new Date());
 
-      // Calculate realized gains for this asset class
       let realizedGains = 0;
+      let unrealizedGains = 0;
       for (const position of data.positions) {
-        realizedGains += position.realizedGain;
+        const cur = position.currency || 'INR';
+        const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
+        realizedGains += toInr(position.realizedGain, cur, usdToInr);
+        unrealizedGains += toInr(position.unrealizedGain, cur, usdToInr) * metalAdj;
       }
 
       results.push({
@@ -287,7 +509,7 @@ export const performanceService = {
           annualizedReturn: calculateAnnualizedReturn(percentageReturn, days),
           totalCost: data.totalCost,
           realizedGains,
-          unrealizedGains: data.positions.reduce((sum, p) => sum + p.unrealizedGain, 0),
+          unrealizedGains,
         },
         holdings: data.positions.length,
         currentValue: data.currentValue,
@@ -381,9 +603,11 @@ export const performanceService = {
       };
     }
 
-    // Get positions for tagged assets
     const allPositions = await transactionService.getAllPositions();
     const positions = allPositions.filter((p) => assetIds.has(p.assetId));
+
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
 
     const startDate = getStartDate(interval);
     const startDateStr = startDate.toISOString().split('T')[0];
@@ -395,11 +619,14 @@ export const performanceService = {
     let unrealizedGains = 0;
 
     for (const position of positions) {
-      startValue += await this.estimateAssetValueAtDate(position.assetId, startDateStr);
-      endValue += position.currentValue;
-      totalCost += position.totalCost;
-      realizedGains += position.realizedGain;
-      unrealizedGains += position.unrealizedGain;
+      const cur = position.currency || 'INR';
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
+      const histValue = await this.estimateAssetValueAtDate(position.assetId, startDateStr);
+      startValue += toInr(histValue, cur, usdToInr) * metalAdj;
+      endValue += toInr(position.currentValue, cur, usdToInr) * metalAdj;
+      totalCost += toInr(position.totalCost, cur, usdToInr);
+      realizedGains += toInr(position.realizedGain, cur, usdToInr);
+      unrealizedGains += toInr(position.unrealizedGain, cur, usdToInr) * metalAdj;
     }
 
     const absoluteReturn = endValue - startValue;
@@ -425,11 +652,26 @@ export const performanceService = {
     };
   },
 
-  // Take a daily snapshot of portfolio value
+  // Take a daily snapshot of portfolio value (all values in INR)
   async takeSnapshot(): Promise<PortfolioSnapshot | null> {
     const today = new Date().toISOString().split('T')[0];
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
 
-    // Check if we already have a snapshot for today
+    const positions = await transactionService.getAllPositions();
+    let totalValue = 0;
+    let totalCost = 0;
+    const allocationByClass: Record<string, number> = {};
+    for (const p of positions) {
+      const cur = p.currency || 'INR';
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(p.assetClass) ? METAL_SELL_FACTOR : 1;
+      const val = toInr(p.currentValue, cur, usdToInr) * metalAdj;
+      totalValue += val;
+      totalCost += toInr(p.totalCost, cur, usdToInr);
+      allocationByClass[p.assetClass] = (allocationByClass[p.assetClass] || 0) + val;
+    }
+    const realizedGains = await transactionService.getTotalRealizedGains();
+
     const existing = await db
       .select()
       .from(schema.portfolioSnapshots)
@@ -437,19 +679,6 @@ export const performanceService = {
       .limit(1);
 
     if (existing.length > 0) {
-      // Update existing snapshot
-      const positions = await transactionService.getAllPositions();
-      const totalValue = positions.reduce((sum, p) => sum + p.currentValue, 0);
-      const totalCost = positions.reduce((sum, p) => sum + p.totalCost, 0);
-      const realizedGains = await transactionService.getTotalRealizedGains();
-
-      // Build allocation breakdown
-      const allocationByClass: Record<string, number> = {};
-      for (const position of positions) {
-        allocationByClass[position.assetClass] =
-          (allocationByClass[position.assetClass] || 0) + position.currentValue;
-      }
-
       await db
         .update(schema.portfolioSnapshots)
         .set({
@@ -461,18 +690,6 @@ export const performanceService = {
         .where(eq(schema.portfolioSnapshots.id, existing[0].id));
 
       return { ...existing[0], totalValue, totalCost };
-    }
-
-    // Create new snapshot
-    const positions = await transactionService.getAllPositions();
-    const totalValue = positions.reduce((sum, p) => sum + p.currentValue, 0);
-    const totalCost = positions.reduce((sum, p) => sum + p.totalCost, 0);
-    const realizedGains = await transactionService.getTotalRealizedGains();
-
-    const allocationByClass: Record<string, number> = {};
-    for (const position of positions) {
-      allocationByClass[position.assetClass] =
-        (allocationByClass[position.assetClass] || 0) + position.currentValue;
     }
 
     const snapshot = {

@@ -47,8 +47,14 @@ export function formatCompactNumber(value: number): string {
   return value.toFixed(2);
 }
 
+// Parse ISO date strings (YYYY-MM-DD) as local time to avoid UTC timezone shift
+function parseLocalDate(dateString: string): Date {
+  const [y, m, d] = dateString.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString('en-US', {
+  return parseLocalDate(dateString).toLocaleDateString('en-IN', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

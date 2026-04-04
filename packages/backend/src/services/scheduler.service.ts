@@ -1,7 +1,9 @@
 import cron from 'node-cron';
+import { sql } from 'drizzle-orm';
 import { marketDataService } from './market-data.service.js';
 import { performanceService } from './performance.service.js';
 import { benchmarkService } from './benchmark.service.js';
+import { db, schema } from '../db/index.js';
 
 let priceUpdateTask: cron.ScheduledTask | null = null;
 let snapshotTask: cron.ScheduledTask | null = null;
@@ -51,6 +53,23 @@ export function startPriceUpdateScheduler() {
       // Update benchmark prices
       const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
       console.log(`Initial benchmark update: ${benchmarkResult.updated} updated`);
+
+      // Auto-backfill historical prices if price_history is sparse
+      const [{ cnt }] = await db
+        .select({ cnt: sql<number>`COUNT(*)` })
+        .from(schema.priceHistory)
+        .all();
+      if (cnt < 100) {
+        console.log(`Price history sparse (${cnt} records), triggering backfill...`);
+        const backfillResult = await marketDataService.backfillHistoricalPrices();
+        console.log(`Backfill complete: ${backfillResult.updated} assets filled, ${backfillResult.skipped} skipped, ${backfillResult.failed} failed`);
+      }
+
+      // Auto-backfill benchmark historical data for any sparse benchmarks
+      const bmResult = await benchmarkService.backfillAllBenchmarks();
+      if (bmResult.updated > 0) {
+        console.log(`Benchmark backfill: ${bmResult.updated} filled, ${bmResult.skipped} skipped, ${bmResult.failed} failed`);
+      }
     } catch (error) {
       console.error('Initial update error:', error);
     }

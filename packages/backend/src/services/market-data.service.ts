@@ -1,9 +1,12 @@
+import { eq, sql } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 import { yahooFinanceProvider } from '../providers/yahoo-finance.provider.js';
 import { coingeckoProvider } from '../providers/coingecko.provider.js';
 import { metalsProvider } from '../providers/metals.provider.js';
 import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 import { indiaMfNavProvider } from '../providers/india-mf-nav.provider.js';
 import { assetService } from './asset.service.js';
+import { db, schema } from '../db/index.js';
 import type { AssetClass, Provider } from '../db/schema.js';
 
 const MANUAL_MF_CLASSES: AssetClass[] = [
@@ -311,5 +314,115 @@ export const marketDataService = {
 
   async getExchangeRate(from: string, to: string) {
     return exchangeRateProvider.getRate(from, to);
+  },
+
+  async backfillHistoricalPrices(): Promise<{ updated: number; skipped: number; failed: number }> {
+    const assets = await assetService.getAll();
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    const firstTxDates = await db
+      .select({
+        assetId: schema.transactions.assetId,
+        minDate: sql<string>`MIN(${schema.transactions.transactionDate})`,
+      })
+      .from(schema.transactions)
+      .groupBy(schema.transactions.assetId)
+      .all();
+    const firstDateMap = new Map(firstTxDates.map((r) => [r.assetId, r.minDate]));
+
+    const existingCounts = await db
+      .select({
+        assetId: schema.priceHistory.assetId,
+        cnt: sql<number>`COUNT(*)`,
+      })
+      .from(schema.priceHistory)
+      .groupBy(schema.priceHistory.assetId)
+      .all();
+    const countMap = new Map(existingCounts.map((r) => [r.assetId, r.cnt]));
+
+    const today = new Date();
+
+    for (const asset of assets) {
+      const firstDate = firstDateMap.get(asset.id);
+      if (!firstDate) { skipped++; continue; }
+
+      const existingCount = countMap.get(asset.id) ?? 0;
+      const daysSinceFirst = Math.ceil(
+        (today.getTime() - new Date(firstDate).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      // Skip if we already have at least 60% of expected trading days covered
+      if (existingCount > 30 && existingCount > daysSinceFirst * 0.4) {
+        skipped++;
+        continue;
+      }
+
+      // Use the asset's actual stored provider, not derived from assetClass
+      const provider = asset.provider as string;
+      const startDate = new Date(firstDate);
+
+      try {
+        let prices: { date: Date; price: number }[] = [];
+
+        if (provider === 'yahoo_finance') {
+          const raw = await yahooFinanceProvider.getHistoricalPrices(asset.symbol, startDate, today);
+          prices = raw.map((r) => ({ date: r.date, price: r.close }));
+        } else if (provider === 'coingecko') {
+          const coinId = coingeckoProvider.getIdFromSymbol(asset.symbol);
+          if (coinId) {
+            const days = Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+            prices = await coingeckoProvider.getHistoricalPrices(coinId, days, 'usd');
+          }
+        } else {
+          // manual / metals_api — no historical API available
+          skipped++;
+          continue;
+        }
+
+        if (prices.length === 0) { failed++; continue; }
+
+        // Batch-load existing dates for this asset
+        const existingDates = new Set(
+          (await db
+            .select({ d: sql<string>`date(${schema.priceHistory.recordedAt} / 1000, 'unixepoch')` })
+            .from(schema.priceHistory)
+            .where(eq(schema.priceHistory.assetId, asset.id))
+            .all()
+          ).map((r) => r.d)
+        );
+
+        // Deduplicate within the batch (CoinGecko can return multiple points per day)
+        const seenDates = new Set<string>();
+        const rows = prices
+          .filter((p) => {
+            const dateStr = p.date.toISOString().split('T')[0];
+            if (p.price <= 0 || existingDates.has(dateStr) || seenDates.has(dateStr)) return false;
+            seenDates.add(dateStr);
+            return true;
+          })
+          .map((p) => ({
+            id: nanoid(),
+            assetId: asset.id,
+            price: p.price,
+            recordedAt: p.date,
+          }));
+
+        if (rows.length > 0) {
+          for (let i = 0; i < rows.length; i += 500) {
+            await db.insert(schema.priceHistory).values(rows.slice(i, i + 500));
+          }
+          updated++;
+          console.log(`Backfilled ${rows.length} price points for ${asset.symbol}`);
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        console.error(`Backfill error for ${asset.symbol}:`, err);
+        failed++;
+      }
+    }
+
+    return { updated, skipped, failed };
   },
 };

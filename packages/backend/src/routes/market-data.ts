@@ -101,6 +101,12 @@ export async function marketDataRoutes(fastify: FastifyInstance) {
     }
   );
 
+  // Backfill historical prices from Yahoo/CoinGecko into price_history
+  fastify.post('/backfill', async () => {
+    const result = await marketDataService.backfillHistoricalPrices();
+    return { success: true, ...result };
+  });
+
   // Get exchange rate
   fastify.get<{ Params: { from: string; to: string } }>(
     '/rate/:from/:to',

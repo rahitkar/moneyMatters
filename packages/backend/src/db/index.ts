@@ -166,6 +166,8 @@ function seedBenchmarks() {
     { symbol: '^GDAXI', name: 'DAX', region: 'Germany' },
     { symbol: '^NSEI', name: 'Nifty 50', region: 'India' },
     { symbol: '^BSESN', name: 'BSE Sensex', region: 'India' },
+    { symbol: 'NIFTYMIDCAP150.NS', name: 'Nifty Midcap 150', region: 'India' },
+    { symbol: 'NIFTYSMLCAP250.NS', name: 'Nifty Smallcap 250', region: 'India' },
   ];
 
   const stmt = sqlite.prepare(`
@@ -176,7 +178,7 @@ function seedBenchmarks() {
   const now = Date.now();
   for (const benchmark of defaultBenchmarks) {
     stmt.run(
-      `benchmark_${benchmark.symbol.replace('^', '')}`,
+      `benchmark_${benchmark.symbol.replace(/[^a-zA-Z0-9]/g, '_')}`,
       benchmark.symbol,
       benchmark.name,
       benchmark.region,

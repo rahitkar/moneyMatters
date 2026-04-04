@@ -618,3 +618,15 @@ export function useRefreshBenchmarks() {
     },
   });
 }
+
+export function useBackfillPrices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ success: boolean; updated: number; skipped: number; failed: number }>('/market-data/backfill'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['performance'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
+      queryClient.invalidateQueries({ queryKey: queryKeys.portfolioHoldings });
+    },
+  });
+}

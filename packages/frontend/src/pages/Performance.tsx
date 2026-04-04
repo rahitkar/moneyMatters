@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Activity, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, BarChart3, Download } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
 import { LoadingPage } from '../components/LoadingSpinner';
@@ -21,8 +21,9 @@ import {
   useBenchmarks,
   useRealizedGainsTotal,
   useExchangeRate,
+  useBackfillPrices,
 } from '../api/hooks';
-import { formatCurrency, formatPercent, formatDate } from '../lib/format';
+import { formatCurrency, formatNumber, formatPercent, formatDate } from '../lib/format';
 import type { TimeInterval } from '../api/types';
 
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
@@ -57,6 +58,7 @@ export default function Performance() {
   const { data: realizedGains } = useRealizedGainsTotal();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = usdInrRate?.rate ?? null;
+  const backfillPrices = useBackfillPrices();
 
   const toggleBenchmark = (symbol: string) => {
     setSelectedBenchmarks((prev) =>
@@ -75,6 +77,17 @@ export default function Performance() {
     <div className="flex flex-col h-full min-h-0 animate-fade-in">
       <div className="flex items-center justify-between shrink-0 mb-6">
         <h1 className="text-2xl font-bold text-surface-100">Performance</h1>
+        <button
+          onClick={() => backfillPrices.mutate()}
+          disabled={backfillPrices.isPending}
+          className={clsx(
+            'btn btn-secondary text-sm',
+            backfillPrices.isPending && 'opacity-50 cursor-not-allowed'
+          )}
+        >
+          <Download className={clsx('w-4 h-4', backfillPrices.isPending && 'animate-pulse')} />
+          {backfillPrices.isPending ? 'Fetching history...' : 'Backfill Prices'}
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
@@ -105,11 +118,11 @@ export default function Performance() {
         </p>
       )}
       {comparison && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard
-            label="P&L %"
+            label="NAV Return"
             value={`${comparison.portfolio.percentageReturn >= 0 ? '+' : ''}${formatPercent(comparison.portfolio.percentageReturn)}`}
-            subValue={`${comparison.portfolio.percentageReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}`}
+            subValue={`NAV: ${formatNumber(comparison.portfolio.currentNAV)}`}
             isPositive={comparison.portfolio.percentageReturn >= 0}
             icon={comparison.portfolio.percentageReturn >= 0 ? TrendingUp : TrendingDown}
           />
@@ -124,13 +137,20 @@ export default function Performance() {
           />
           <StatCard
             label="Total P&L"
+            value={formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}
+            usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.absoluteReturn / usdToInr, 'USD') : undefined}
+            isPositive={comparison.portfolio.absoluteReturn >= 0}
+            icon={BarChart3}
+          />
+          <StatCard
+            label="Unrealized"
             value={formatCurrency(comparison.portfolio.unrealizedGains, 'INR')}
             usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.unrealizedGains / usdToInr, 'USD') : undefined}
             isPositive={comparison.portfolio.unrealizedGains >= 0}
             icon={BarChart3}
           />
           <StatCard
-            label="Realized P&L"
+            label="Realized"
             value={formatCurrency(realizedGains ?? 0, 'INR')}
             usdSubValue={usdToInr ? formatCurrency((realizedGains ?? 0) / usdToInr, 'USD') : undefined}
             isPositive={(realizedGains ?? 0) >= 0}
@@ -142,9 +162,14 @@ export default function Performance() {
       {/* Performance Chart */}
       <Card>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-surface-100">
-            Portfolio vs Benchmarks
-          </h2>
+          <div>
+            <h2 className="text-lg font-semibold text-surface-100">
+              Performance Curve (NAV)
+            </h2>
+            <p className="text-xs text-surface-500 mt-0.5">
+              Tracks pure investment returns — deposits &amp; withdrawals are excluded
+            </p>
+          </div>
           {comparison?.portfolio.annualizedReturn !== null && (
             <span className="text-sm text-surface-400">
               Annualized: {formatPercent(comparison.portfolio.annualizedReturn)}
@@ -168,18 +193,7 @@ export default function Performance() {
                   fontSize={12}
                   tickFormatter={(v) => `${v.toFixed(1)}%`}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#27272a',
-                    border: '1px solid #3f3f46',
-                    borderRadius: '12px',
-                  }}
-                  labelFormatter={(d) => formatDate(d)}
-                  formatter={(value: number, name: string) => [
-                    `${value.toFixed(2)}%`,
-                    name,
-                  ]}
-                />
+                <Tooltip content={<PerfTooltip />} />
                 <Legend />
                 <Line
                   type="monotone"
@@ -208,7 +222,7 @@ export default function Performance() {
           <EmptyState
             icon={Activity}
             title="No performance data"
-            description="Add some transactions to see your portfolio performance."
+            description="Click 'Backfill Prices' above to fetch historical price data, then the chart will populate."
           />
         )}
       </Card>
@@ -309,22 +323,22 @@ export default function Performance() {
                 <tr className="border-b border-surface-700">
                   <th className="table-header">Index</th>
                   <th className="table-header">Region</th>
-                  <th className="table-header text-right">Start Price</th>
-                  <th className="table-header text-right">End Price</th>
+                  <th className="table-header text-right">Start</th>
+                  <th className="table-header text-right">Current</th>
                   <th className="table-header text-right">Return</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
                 <tr className="bg-brand-600/10">
                   <td className="table-cell font-medium text-brand-400">
-                    Your Portfolio
+                    Your Portfolio (NAV)
                   </td>
                   <td className="table-cell text-surface-400">—</td>
                   <td className="table-cell text-right tabular-nums">
-                    {formatCurrency(comparison.portfolio.startValue, 'INR')}
+                    {formatNumber(comparison.portfolio.navHistory?.[0]?.nav ?? 1000)}
                   </td>
                   <td className="table-cell text-right tabular-nums">
-                    {formatCurrency(comparison.portfolio.endValue, 'INR')}
+                    {formatNumber(comparison.portfolio.currentNAV)}
                   </td>
                   <td
                     className={clsx(
@@ -345,10 +359,10 @@ export default function Performance() {
                     </td>
                     <td className="table-cell text-surface-400">{benchmark.region}</td>
                     <td className="table-cell text-right tabular-nums">
-                      {formatCurrency(benchmark.startPrice)}
+                      {formatNumber(benchmark.startPrice)}
                     </td>
                     <td className="table-cell text-right tabular-nums">
-                      {formatCurrency(benchmark.endPrice)}
+                      {formatNumber(benchmark.endPrice)}
                     </td>
                     <td
                       className={clsx(
@@ -423,48 +437,92 @@ function StatCard({
   );
 }
 
-// Build chart data from comparison
+// Custom tooltip showing NAV values + % change
+function PerfTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+
+  const dataRow = payload[0]?.payload;
+  if (!dataRow) return null;
+
+  return (
+    <div className="bg-surface-900 border border-surface-700 rounded-xl px-4 py-3 shadow-xl text-sm">
+      <p className="text-surface-400 text-xs mb-2 font-medium">{formatDate(label)}</p>
+      <div className="space-y-1.5">
+        {payload.map((entry: any) => {
+          const pct = entry.value as number;
+          const isPortfolio = entry.dataKey === 'portfolio';
+          const rawKey = `_raw_${entry.dataKey}`;
+          const rawValue = dataRow[rawKey] as number | undefined;
+          const displayName = isPortfolio ? 'Portfolio NAV' : entry.name;
+
+          return (
+            <div key={entry.dataKey} className="flex items-center gap-2">
+              <span
+                className="w-2.5 h-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: entry.color }}
+              />
+              <span className="text-surface-300 font-medium min-w-0">
+                {displayName}:
+              </span>
+              <span className="text-surface-100 tabular-nums font-semibold">
+                {rawValue !== undefined ? formatNumber(rawValue) : '—'}
+              </span>
+              <span
+                className={clsx(
+                  'tabular-nums text-xs',
+                  pct >= 0 ? 'text-green-400' : 'text-red-400'
+                )}
+              >
+                {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(2)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Build chart data from comparison — uses NAV history for portfolio.
+// Stores both % change (for Y-axis) and raw values (for tooltip).
 function buildChartData(comparison: ReturnType<typeof usePerformanceComparison>['data']) {
   if (!comparison) return [];
 
   const { portfolio, benchmarks } = comparison;
+  const navHistory = portfolio.navHistory ?? [];
   const allDates = new Set<string>();
 
-  // Collect all dates
-  portfolio.valueHistory.forEach((p) => allDates.add(p.date));
+  navHistory.forEach((p) => allDates.add(p.date));
   benchmarks.forEach((b) => b.priceHistory.forEach((p) => allDates.add(p.date)));
 
   const sortedDates = Array.from(allDates).sort();
 
-  // Calculate percentage change from start for each series
-  const portfolioStart = portfolio.valueHistory[0]?.value || 1;
+  const navStart = navHistory[0]?.nav || 1;
   const benchmarkStarts = benchmarks.map(
     (b) => b.priceHistory[0]?.price || 1
   );
 
-  // Build portfolio lookup
-  const portfolioMap = new Map(portfolio.valueHistory.map((p) => [p.date, p.value]));
-
-  // Build benchmark lookups
+  const navMap = new Map(navHistory.map((p) => [p.date, p.nav]));
   const benchmarkMaps = benchmarks.map(
     (b) => new Map(b.priceHistory.map((p) => [p.date, p.price]))
   );
 
+  const lastKnownNav = { value: navStart };
+  const lastKnownBenchmarks = benchmarkStarts.map((s) => ({ value: s }));
+
   return sortedDates.map((date) => {
     const row: Record<string, string | number> = { date };
 
-    // Portfolio percentage change
-    const portfolioValue = portfolioMap.get(date);
-    if (portfolioValue !== undefined) {
-      row.portfolio = ((portfolioValue - portfolioStart) / portfolioStart) * 100;
-    }
+    const nav = navMap.get(date) ?? lastKnownNav.value;
+    lastKnownNav.value = nav;
+    row.portfolio = ((nav - navStart) / navStart) * 100;
+    row._raw_portfolio = nav;
 
-    // Benchmark percentage changes
     benchmarks.forEach((benchmark, idx) => {
-      const price = benchmarkMaps[idx].get(date);
-      if (price !== undefined) {
-        row[benchmark.symbol] = ((price - benchmarkStarts[idx]) / benchmarkStarts[idx]) * 100;
-      }
+      const price = benchmarkMaps[idx].get(date) ?? lastKnownBenchmarks[idx].value;
+      lastKnownBenchmarks[idx].value = price;
+      row[benchmark.symbol] = ((price - benchmarkStarts[idx]) / benchmarkStarts[idx]) * 100;
+      row[`_raw_${benchmark.symbol}`] = price;
     });
 
     return row;

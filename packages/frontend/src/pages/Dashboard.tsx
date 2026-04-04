@@ -209,7 +209,7 @@ export default function Dashboard() {
   const { data: performance } = usePortfolioPerformance(perfInterval);
   const { data: realizedGains } = useRealizedGainsTotal();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
-  const usdToInr = usdInrRate?.rate ?? null;
+  const usdToInr = summary?.usdToInr ?? usdInrRate?.rate ?? null;
 
   const filteredHoldings = useMemo(() => {
     if (!holdings) return [];
@@ -573,6 +573,93 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {/* Top & Worst Performers */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Top Performers */}
+        <Card className="animate-slide-up">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-green-400" />
+              Top Performers
+              {selectedSlice && (
+                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
+              )}
+            </h2>
+          </div>
+          {filteredTop5.length > 0 ? (
+            <div className="space-y-4">
+              {filteredTop5.map((holding, index) => (
+                <div
+                  key={holding.id}
+                  className="flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 text-xs flex items-center justify-center font-medium">
+                      {index + 1}
+                    </span>
+                    <div>
+                      <p className="font-medium text-surface-100">
+                        {holding.symbol}
+                      </p>
+                      <p className="text-xs text-surface-500">{holding.name}</p>
+                    </div>
+                  </div>
+                  <span className="text-green-400 font-medium tabular-nums">
+                    +{formatPercent(holding.gainPercent)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-surface-500 text-center py-8">
+              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
+            </p>
+          )}
+        </Card>
+
+        {/* Worst Performers */}
+        <Card className="animate-slide-up animate-delay-100">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
+              <TrendingDown className="w-5 h-5 text-red-400" />
+              Worst Performers
+              {selectedSlice && (
+                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
+              )}
+            </h2>
+          </div>
+          {filteredWorst5.length > 0 ? (
+            <div className="space-y-4">
+              {filteredWorst5.map((holding, index) => (
+                <div
+                  key={holding.id}
+                  className="flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 text-xs flex items-center justify-center font-medium">
+                      {index + 1}
+                    </span>
+                    <div>
+                      <p className="font-medium text-surface-100">
+                        {holding.symbol}
+                      </p>
+                      <p className="text-xs text-surface-500">{holding.name}</p>
+                    </div>
+                  </div>
+                  <span className="text-red-400 font-medium tabular-nums">
+                    {formatPercent(holding.gainPercent)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-surface-500 text-center py-8">
+              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
+            </p>
+          )}
+        </Card>
+      </div>
+
       {/* Performance Chart */}
       <Card className="animate-slide-up">
         <div className="flex items-center justify-between mb-6">
@@ -717,93 +804,6 @@ export default function Dashboard() {
           </div>
         )}
       </Card>
-
-      {/* Performance */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Top Performers */}
-        <Card className="animate-slide-up">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-green-400" />
-              Top Performers
-              {selectedSlice && (
-                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
-              )}
-            </h2>
-          </div>
-          {filteredTop5.length > 0 ? (
-            <div className="space-y-4">
-              {filteredTop5.map((holding, index) => (
-                <div
-                  key={holding.id}
-                  className="flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 text-xs flex items-center justify-center font-medium">
-                      {index + 1}
-                    </span>
-                    <div>
-                      <p className="font-medium text-surface-100">
-                        {holding.symbol}
-                      </p>
-                      <p className="text-xs text-surface-500">{holding.name}</p>
-                    </div>
-                  </div>
-                  <span className="text-green-400 font-medium tabular-nums">
-                    +{formatPercent(holding.gainPercent)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-surface-500 text-center py-8">
-              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
-            </p>
-          )}
-        </Card>
-
-        {/* Worst Performers */}
-        <Card className="animate-slide-up animate-delay-100">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
-              <TrendingDown className="w-5 h-5 text-red-400" />
-              Worst Performers
-              {selectedSlice && (
-                <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
-              )}
-            </h2>
-          </div>
-          {filteredWorst5.length > 0 ? (
-            <div className="space-y-4">
-              {filteredWorst5.map((holding, index) => (
-                <div
-                  key={holding.id}
-                  className="flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 text-xs flex items-center justify-center font-medium">
-                      {index + 1}
-                    </span>
-                    <div>
-                      <p className="font-medium text-surface-100">
-                        {holding.symbol}
-                      </p>
-                      <p className="text-xs text-surface-500">{holding.name}</p>
-                    </div>
-                  </div>
-                  <span className="text-red-400 font-medium tabular-nums">
-                    {formatPercent(holding.gainPercent)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-surface-500 text-center py-8">
-              No {selectedSlice ? 'holdings in this category' : 'performance data yet'}
-            </p>
-          )}
-        </Card>
-      </div>
       </div>
     </div>
   );

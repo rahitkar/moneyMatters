@@ -96,6 +96,7 @@ export interface PortfolioSummary {
   currency: string;
   assetCount: number;
   holdingCount: number;
+  usdToInr: number | null;
 }
 
 export interface AssetAllocation {
@@ -207,6 +208,9 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   startDate: string;
   endDate: string;
   valueHistory: { date: string; value: number }[];
+  navHistory: { date: string; nav: number }[];
+  currentNAV: number;
+  totalUnits: number;
 }
 
 export interface BenchmarkPerformance {

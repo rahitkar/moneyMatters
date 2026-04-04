@@ -46,6 +46,7 @@ import {
   useTransactionsWithAssets,
   useExchangeRate,
   useApplyStockSplit,
+  usePortfolioSummary,
 } from '../api/hooks';
 import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime } from '../lib/format';
 import type { AssetClass, Provider, Tag, SearchResult, Position, TransactionWithAsset } from '../api/types';
@@ -386,8 +387,9 @@ export default function Assets() {
   const { data: allTransactions, isLoading: txLoading } = useTransactionsWithAssets();
   const { data: allAssets } = useAssets();
   const { data: tags } = useTags();
+  const { data: summary } = usePortfolioSummary();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
-  const usdToInr = usdInrRate?.rate ?? null;
+  const usdToInr = summary?.usdToInr ?? usdInrRate?.rate ?? null;
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
@@ -517,8 +519,25 @@ export default function Assets() {
         : [...f.tagIds, tagId],
     }));
 
+  const isFiltered = activeFilterCount > 0;
+
   const totals = useMemo(() => {
     if (!filteredPositions.length) return null;
+
+    // When unfiltered, use server-computed summary for consistent values with Dashboard
+    if (!isFiltered && summary) {
+      const rate = summary.usdToInr;
+      return {
+        invested: summary.totalCost,
+        current: summary.totalValue,
+        pnl: summary.totalGain,
+        pnlPercent: summary.totalGainPercent,
+        investedUsd: rate ? summary.totalCost / rate : null,
+        currentUsd: rate ? summary.totalValue / rate : null,
+        pnlUsd: rate ? summary.totalGain / rate : null,
+      };
+    }
+
     const METAL_SELL_FACTOR = 0.95;
     const invested = filteredPositions.reduce((s, p) => s + toInr(p.totalCost, p.currency, usdToInr), 0);
     const current = filteredPositions.reduce((s, p) => {
@@ -531,7 +550,7 @@ export default function Assets() {
     const currentUsd = usdToInr ? current / usdToInr : null;
     const pnlUsd = usdToInr ? pnl / usdToInr : null;
     return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd };
-  }, [filteredPositions, usdToInr]);
+  }, [filteredPositions, usdToInr, isFiltered, summary]);
 
   const toggleAssetSelection = useCallback((assetId: string) => {
     setSelectedAssets((prev) => {

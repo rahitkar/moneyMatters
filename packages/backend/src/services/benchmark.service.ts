@@ -1,4 +1,4 @@
-import { eq, and, gte, desc } from 'drizzle-orm';
+import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import { yahooFinanceProvider } from '../providers/yahoo-finance.provider.js';
@@ -106,7 +106,7 @@ export const benchmarkService = {
       .where(eq(schema.benchmarks.id, id));
   },
 
-  // Fetch and store historical prices for a benchmark
+  // Fetch and store historical prices for a benchmark (batch insert, skip existing dates)
   async fetchHistoricalPrices(
     benchmarkId: string,
     symbol: string,
@@ -120,32 +120,30 @@ export const benchmarkService = {
         endDate
       );
 
-      const now = new Date();
+      if (prices.length === 0) return;
 
-      for (const pricePoint of prices) {
-        const dateStr = pricePoint.date.toISOString().split('T')[0];
-
-        // Check if we already have this date
-        const existing = await db
-          .select()
+      const existingDates = new Set(
+        (await db
+          .select({ date: schema.benchmarkPrices.recordedDate })
           .from(schema.benchmarkPrices)
-          .where(
-            and(
-              eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
-              eq(schema.benchmarkPrices.recordedDate, dateStr)
-            )
-          )
-          .limit(1);
+          .where(eq(schema.benchmarkPrices.benchmarkId, benchmarkId))
+          .all()
+        ).map((r) => r.date)
+      );
 
-        if (existing.length === 0) {
-          await db.insert(schema.benchmarkPrices).values({
-            id: nanoid(),
-            benchmarkId,
-            price: pricePoint.close,
-            recordedDate: dateStr,
-            createdAt: now,
-          });
-        }
+      const now = new Date();
+      const newRows = prices
+        .map((p) => ({
+          id: nanoid(),
+          benchmarkId,
+          price: p.close,
+          recordedDate: p.date.toISOString().split('T')[0],
+          createdAt: now,
+        }))
+        .filter((r) => r.price > 0 && !existingDates.has(r.recordedDate));
+
+      for (let i = 0; i < newRows.length; i += 500) {
+        await db.insert(schema.benchmarkPrices).values(newRows.slice(i, i + 500));
       }
     } catch (error) {
       console.error(`Failed to fetch prices for ${symbol}:`, error);
@@ -209,14 +207,47 @@ export const benchmarkService = {
     const benchmark = await this.getBySymbol(symbol);
     if (!benchmark) return null;
 
-    // First, ensure we have recent data
     const startDate = getStartDate(interval);
-    await this.fetchHistoricalPrices(benchmark.id, symbol, startDate);
+
+    // Only fetch from Yahoo if latest stored price is stale (> 1 day old)
+    const latestStored = await db
+      .select({ date: schema.benchmarkPrices.recordedDate })
+      .from(schema.benchmarkPrices)
+      .where(eq(schema.benchmarkPrices.benchmarkId, benchmark.id))
+      .orderBy(desc(schema.benchmarkPrices.recordedDate))
+      .limit(1)
+      .then((r) => r[0]);
+
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const needsRefresh = !latestStored || latestStored.date < yesterday;
+
+    if (needsRefresh) {
+      // Only fetch the gap: from last stored date (or interval start) to now
+      const fetchFrom = latestStored
+        ? new Date(latestStored.date)
+        : startDate;
+      await this.fetchHistoricalPrices(benchmark.id, symbol, fetchFrom);
+    }
+
+    // Also check if we have data covering the interval start
+    const earliestStored = await db
+      .select({ date: schema.benchmarkPrices.recordedDate })
+      .from(schema.benchmarkPrices)
+      .where(eq(schema.benchmarkPrices.benchmarkId, benchmark.id))
+      .orderBy(schema.benchmarkPrices.recordedDate)
+      .limit(1)
+      .then((r) => r[0]);
+
+    const startDateStr = startDate.toISOString().split('T')[0];
+    if (!earliestStored || earliestStored.date > startDateStr) {
+      // Need historical data before what we have
+      const fetchEnd = earliestStored ? new Date(earliestStored.date) : new Date();
+      await this.fetchHistoricalPrices(benchmark.id, symbol, startDate, fetchEnd);
+    }
 
     const priceHistory = await this.getPriceHistory(benchmark.id, interval);
 
     if (priceHistory.length < 2) {
-      // Not enough data, try to fetch more
       return null;
     }
 
@@ -277,5 +308,36 @@ export const benchmarkService = {
   // Delete a benchmark
   async deleteBenchmark(id: string): Promise<void> {
     await db.delete(schema.benchmarks).where(eq(schema.benchmarks.id, id));
+  },
+
+  // Backfill historical data for all active benchmarks that have sparse data
+  async backfillAllBenchmarks(): Promise<{ updated: number; skipped: number; failed: number }> {
+    const benchmarks = await this.getActive();
+    let updated = 0, skipped = 0, failed = 0;
+
+    for (const benchmark of benchmarks) {
+      try {
+        const count = await db
+          .select({ cnt: sql<number>`COUNT(*)` })
+          .from(schema.benchmarkPrices)
+          .where(eq(schema.benchmarkPrices.benchmarkId, benchmark.id))
+          .then((r) => r[0]?.cnt ?? 0);
+
+        if (count > 100) {
+          skipped++;
+          continue;
+        }
+
+        console.log(`Backfilling ${benchmark.symbol} (${count} existing records)...`);
+        const startDate = new Date(2020, 0, 1);
+        await this.fetchHistoricalPrices(benchmark.id, benchmark.symbol, startDate);
+        updated++;
+      } catch (error) {
+        console.error(`Failed to backfill ${benchmark.symbol}:`, error);
+        failed++;
+      }
+    }
+
+    return { updated, skipped, failed };
   },
 };
