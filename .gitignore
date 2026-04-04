@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.turbo/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# SQLite database (runtime data, not source)
+packages/backend/data/money-matters.db
+packages/backend/data/money-matters.db-journal
+packages/backend/data/money-matters.db-wal
+packages/backend/data/money-matters.db-shm
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Cursor
+.cursor/

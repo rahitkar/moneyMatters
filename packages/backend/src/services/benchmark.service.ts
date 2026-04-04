@@ -1,0 +1,281 @@
+import { eq, and, gte, desc } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import { db, schema } from '../db/index.js';
+import { yahooFinanceProvider } from '../providers/yahoo-finance.provider.js';
+import type { Benchmark, BenchmarkPrice, TimeInterval } from '../db/schema.js';
+
+export interface BenchmarkWithLatestPrice extends Benchmark {
+  latestPrice: number | null;
+  latestDate: string | null;
+}
+
+export interface BenchmarkPerformance {
+  symbol: string;
+  name: string;
+  region: string;
+  startPrice: number;
+  endPrice: number;
+  change: number;
+  changePercent: number;
+  priceHistory: { date: string; price: number }[];
+}
+
+// Calculate start date based on interval
+function getStartDate(interval: TimeInterval): Date {
+  const now = new Date();
+  switch (interval) {
+    case '1D':
+      return new Date(now.setDate(now.getDate() - 1));
+    case '1W':
+      return new Date(now.setDate(now.getDate() - 7));
+    case '1M':
+      return new Date(now.setMonth(now.getMonth() - 1));
+    case '3M':
+      return new Date(now.setMonth(now.getMonth() - 3));
+    case '6M':
+      return new Date(now.setMonth(now.getMonth() - 6));
+    case '1Y':
+      return new Date(now.setFullYear(now.getFullYear() - 1));
+    case 'YTD':
+      return new Date(now.getFullYear(), 0, 1);
+    case 'ALL':
+      return new Date(2000, 0, 1); // Far enough back
+    default:
+      return new Date(now.setMonth(now.getMonth() - 1));
+  }
+}
+
+export const benchmarkService = {
+  async getAll(): Promise<Benchmark[]> {
+    return db.select().from(schema.benchmarks).all();
+  },
+
+  async getActive(): Promise<Benchmark[]> {
+    return db
+      .select()
+      .from(schema.benchmarks)
+      .where(eq(schema.benchmarks.isActive, true))
+      .all();
+  },
+
+  async getById(id: string): Promise<Benchmark | undefined> {
+    const results = await db
+      .select()
+      .from(schema.benchmarks)
+      .where(eq(schema.benchmarks.id, id))
+      .limit(1);
+    return results[0];
+  },
+
+  async getBySymbol(symbol: string): Promise<Benchmark | undefined> {
+    const results = await db
+      .select()
+      .from(schema.benchmarks)
+      .where(eq(schema.benchmarks.symbol, symbol))
+      .limit(1);
+    return results[0];
+  },
+
+  async getAllWithLatestPrices(): Promise<BenchmarkWithLatestPrice[]> {
+    const benchmarks = await this.getActive();
+    const results: BenchmarkWithLatestPrice[] = [];
+
+    for (const benchmark of benchmarks) {
+      const latestPrice = await db
+        .select()
+        .from(schema.benchmarkPrices)
+        .where(eq(schema.benchmarkPrices.benchmarkId, benchmark.id))
+        .orderBy(desc(schema.benchmarkPrices.recordedDate))
+        .limit(1)
+        .then((r) => r[0]);
+
+      results.push({
+        ...benchmark,
+        latestPrice: latestPrice?.price ?? null,
+        latestDate: latestPrice?.recordedDate ?? null,
+      });
+    }
+
+    return results;
+  },
+
+  async toggleActive(id: string, isActive: boolean): Promise<void> {
+    await db
+      .update(schema.benchmarks)
+      .set({ isActive })
+      .where(eq(schema.benchmarks.id, id));
+  },
+
+  // Fetch and store historical prices for a benchmark
+  async fetchHistoricalPrices(
+    benchmarkId: string,
+    symbol: string,
+    startDate: Date,
+    endDate: Date = new Date()
+  ): Promise<void> {
+    try {
+      const prices = await yahooFinanceProvider.getHistoricalPrices(
+        symbol,
+        startDate,
+        endDate
+      );
+
+      const now = new Date();
+
+      for (const pricePoint of prices) {
+        const dateStr = pricePoint.date.toISOString().split('T')[0];
+
+        // Check if we already have this date
+        const existing = await db
+          .select()
+          .from(schema.benchmarkPrices)
+          .where(
+            and(
+              eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
+              eq(schema.benchmarkPrices.recordedDate, dateStr)
+            )
+          )
+          .limit(1);
+
+        if (existing.length === 0) {
+          await db.insert(schema.benchmarkPrices).values({
+            id: nanoid(),
+            benchmarkId,
+            price: pricePoint.close,
+            recordedDate: dateStr,
+            createdAt: now,
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to fetch prices for ${symbol}:`, error);
+    }
+  },
+
+  // Update all active benchmarks with latest prices
+  async updateAllBenchmarkPrices(): Promise<{ updated: number; failed: number }> {
+    const benchmarks = await this.getActive();
+    let updated = 0;
+    let failed = 0;
+
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7); // Last 7 days
+
+    for (const benchmark of benchmarks) {
+      try {
+        await this.fetchHistoricalPrices(benchmark.id, benchmark.symbol, startDate, endDate);
+        updated++;
+      } catch (error) {
+        console.error(`Failed to update ${benchmark.symbol}:`, error);
+        failed++;
+      }
+    }
+
+    return { updated, failed };
+  },
+
+  // Get price history for a benchmark within an interval
+  async getPriceHistory(
+    benchmarkId: string,
+    interval: TimeInterval
+  ): Promise<{ date: string; price: number }[]> {
+    const startDate = getStartDate(interval);
+    const startDateStr = startDate.toISOString().split('T')[0];
+
+    const prices = await db
+      .select({
+        date: schema.benchmarkPrices.recordedDate,
+        price: schema.benchmarkPrices.price,
+      })
+      .from(schema.benchmarkPrices)
+      .where(
+        and(
+          eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
+          gte(schema.benchmarkPrices.recordedDate, startDateStr)
+        )
+      )
+      .orderBy(schema.benchmarkPrices.recordedDate)
+      .all();
+
+    return prices;
+  },
+
+  // Get performance for a benchmark over an interval
+  async getPerformance(
+    symbol: string,
+    interval: TimeInterval
+  ): Promise<BenchmarkPerformance | null> {
+    const benchmark = await this.getBySymbol(symbol);
+    if (!benchmark) return null;
+
+    // First, ensure we have recent data
+    const startDate = getStartDate(interval);
+    await this.fetchHistoricalPrices(benchmark.id, symbol, startDate);
+
+    const priceHistory = await this.getPriceHistory(benchmark.id, interval);
+
+    if (priceHistory.length < 2) {
+      // Not enough data, try to fetch more
+      return null;
+    }
+
+    const startPrice = priceHistory[0].price;
+    const endPrice = priceHistory[priceHistory.length - 1].price;
+    const change = endPrice - startPrice;
+    const changePercent = startPrice > 0 ? (change / startPrice) * 100 : 0;
+
+    return {
+      symbol: benchmark.symbol,
+      name: benchmark.name,
+      region: benchmark.region,
+      startPrice,
+      endPrice,
+      change,
+      changePercent,
+      priceHistory,
+    };
+  },
+
+  // Get performance for multiple benchmarks
+  async getMultiplePerformance(
+    symbols: string[],
+    interval: TimeInterval
+  ): Promise<BenchmarkPerformance[]> {
+    const results: BenchmarkPerformance[] = [];
+
+    for (const symbol of symbols) {
+      const perf = await this.getPerformance(symbol, interval);
+      if (perf) {
+        results.push(perf);
+      }
+    }
+
+    return results;
+  },
+
+  // Add a custom benchmark
+  async addCustomBenchmark(
+    symbol: string,
+    name: string,
+    region: string
+  ): Promise<Benchmark> {
+    const now = new Date();
+    const newBenchmark = {
+      id: nanoid(),
+      symbol,
+      name,
+      region,
+      isActive: true,
+      createdAt: now,
+    };
+
+    await db.insert(schema.benchmarks).values(newBenchmark);
+    return newBenchmark as Benchmark;
+  },
+
+  // Delete a benchmark
+  async deleteBenchmark(id: string): Promise<void> {
+    await db.delete(schema.benchmarks).where(eq(schema.benchmarks.id, id));
+  },
+};

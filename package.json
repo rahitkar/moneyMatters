@@ -1,0 +1,22 @@
+{
+  "name": "money-matters",
+  "version": "1.0.0",
+  "description": "Asset management and tracking application",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:backend": "pnpm --filter @money-matters/backend dev",
+    "dev:frontend": "pnpm --filter @money-matters/frontend dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "keywords": ["assets", "portfolio", "tracking", "finance"],
+  "author": "",
+  "license": "MIT",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}
