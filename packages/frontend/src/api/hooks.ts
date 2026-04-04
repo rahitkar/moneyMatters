@@ -164,6 +164,18 @@ export function useSetAssetTags() {
   });
 }
 
+export function useBulkTagAssets() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetIds, tagIds, action }: { assetIds: string[]; tagIds: string[]; action: 'add' | 'remove' }) =>
+      api.post<{ success: boolean; action: string; count: number }>('/assets/bulk-tags', { assetIds, tagIds, action }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+    },
+  });
+}
+
 // Holdings
 export function useHoldings() {
   return useQuery({

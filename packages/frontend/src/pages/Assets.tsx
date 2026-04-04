@@ -1,10 +1,11 @@
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useCallback, Fragment } from 'react';
 import {
   Plus,
   Search,
   Trash2,
   Wallet,
   Tag as TagIcon,
+  Tags as TagsIcon,
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
@@ -16,6 +17,8 @@ import {
   RefreshCw,
   PiggyBank,
   Scale,
+  X,
+  CheckSquare,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
@@ -37,6 +40,7 @@ import {
   useSearch,
   useTags,
   useSetAssetTags,
+  useBulkTagAssets,
   usePositions,
   useTransactionsWithAssets,
   useExchangeRate,
@@ -297,6 +301,9 @@ export default function Assets() {
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [colFilter, setColFilter] = useState<ColFilter>({ ...EMPTY_COL_FILTER });
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
+  const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
 
   const isLoading = posLoading || txLoading;
 
@@ -410,6 +417,27 @@ export default function Assets() {
     return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd };
   }, [filteredPositions, usdToInr]);
 
+  const toggleAssetSelection = useCallback((assetId: string) => {
+    setSelectedAssets((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }, []);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedAssets(new Set(filteredPositions.map((p) => p.assetId)));
+  }, [filteredPositions]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedAssets(new Set());
+    setBulkSelectMode(false);
+  }, []);
+
+  const allVisibleSelected = filteredPositions.length > 0 && selectedAssets.size === filteredPositions.length
+    && filteredPositions.every((p) => selectedAssets.has(p.assetId));
+
   if (isLoading) {
     return <LoadingPage />;
   }
@@ -437,6 +465,21 @@ export default function Assets() {
                 {activeFilterCount}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => {
+              if (bulkSelectMode) clearSelection();
+              else setBulkSelectMode(true);
+            }}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+              bulkSelectMode
+                ? 'bg-brand-600/20 text-brand-400'
+                : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
+            )}
+          >
+            <TagsIcon className="w-4 h-4" />
+            Bulk Tag
           </button>
           <button
             onClick={() => setIsAddModalOpen(true)}
@@ -669,6 +712,31 @@ export default function Assets() {
         </Card>
       )}
 
+      {/* Bulk action bar */}
+      {selectedAssets.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-brand-600/10 border border-brand-500/20 animate-fade-in">
+          <CheckSquare className="w-4 h-4 text-brand-400 flex-shrink-0" />
+          <span className="text-sm text-surface-200 font-medium">
+            {selectedAssets.size} asset{selectedAssets.size > 1 ? 's' : ''} selected
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setIsBulkTagModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-brand-600/20 text-brand-300 hover:bg-brand-600/30 transition-colors"
+          >
+            <TagsIcon className="w-3.5 h-3.5" />
+            Tag Selected
+          </button>
+          <button
+            onClick={clearSelection}
+            className="p-1.5 rounded-lg text-surface-400 hover:text-surface-100 hover:bg-surface-700/50 transition-colors"
+            title="Clear selection"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Positions Table */}
       {filteredPositions.length > 0 ? (
         <Card padding="sm">
@@ -676,6 +744,17 @@ export default function Assets() {
             <table className="w-full table-fixed">
               <thead>
                 <tr className="border-b border-surface-700">
+                  {bulkSelectMode && (
+                    <th className="table-header w-8">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={() => allVisibleSelected ? clearSelection() : selectAllVisible()}
+                        className="w-3.5 h-3.5 rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-500/30 focus:ring-offset-0 cursor-pointer"
+                        title={allVisibleSelected ? 'Deselect all' : 'Select all visible'}
+                      />
+                    </th>
+                  )}
                   <th className="table-header w-8"></th>
                   <SortableHeader field="name" label="Name" current={sortField} dir={sortDir} onSort={handleSort} />
                   <SortableHeader field="assetClass" label="Class" current={sortField} dir={sortDir} onSort={handleSort} />
@@ -696,11 +775,14 @@ export default function Assets() {
                       position={position}
                       usdToInr={usdToInr}
                       isExpanded={expandedAssetId === position.assetId}
+                      bulkSelectMode={bulkSelectMode}
+                      isSelected={selectedAssets.has(position.assetId)}
                       onToggle={() =>
                         setExpandedAssetId((prev) =>
                           prev === position.assetId ? null : position.assetId
                         )
                       }
+                      onSelectToggle={() => toggleAssetSelection(position.assetId)}
                       onTagClick={() => {
                         setSelectedAssetId(position.assetId);
                         setIsTagModalOpen(true);
@@ -730,7 +812,7 @@ export default function Assets() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-surface-600">
-                  <td className="table-cell" colSpan={6}>
+                  <td className="table-cell" colSpan={bulkSelectMode ? 7 : 6}>
                     <span className="font-semibold text-surface-100">Total ({filteredPositions.length} assets)</span>
                   </td>
                   <td className="table-cell text-right tabular-nums font-semibold text-surface-100">
@@ -851,6 +933,16 @@ export default function Assets() {
         />
       )}
 
+      {/* Bulk Tag Modal */}
+      <BulkTagModal
+        isOpen={isBulkTagModalOpen}
+        onClose={() => setIsBulkTagModalOpen(false)}
+        assetIds={selectedAssets}
+        tags={tags || []}
+        allAssets={allAssets}
+        onDone={clearSelection}
+      />
+
       {/* Stock Split Modal */}
       {splitTarget && (
         <StockSplitModal
@@ -903,7 +995,10 @@ function PositionRow({
   position,
   usdToInr,
   isExpanded,
+  bulkSelectMode,
+  isSelected,
   onToggle,
+  onSelectToggle,
   onTagClick,
   onSplitClick,
   onUpdateBalance,
@@ -913,7 +1008,10 @@ function PositionRow({
   position: Position;
   usdToInr: number | null;
   isExpanded: boolean;
+  bulkSelectMode: boolean;
+  isSelected: boolean;
   onToggle: () => void;
+  onSelectToggle: () => void;
   onTagClick: () => void;
   onSplitClick: () => void;
   onUpdateBalance: () => void;
@@ -941,7 +1039,17 @@ function PositionRow({
   };
 
   return (
-    <tr className={clsx('group relative hover:bg-surface-800/30 transition-colors', isExpanded && 'bg-surface-800/20')}>
+    <tr className={clsx('group relative hover:bg-surface-800/30 transition-colors', isExpanded && 'bg-surface-800/20', isSelected && 'bg-brand-500/5')}>
+      {bulkSelectMode && (
+        <td className="table-cell w-8">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={onSelectToggle}
+            className="w-3.5 h-3.5 rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-500/30 focus:ring-offset-0 cursor-pointer"
+          />
+        </td>
+      )}
       <td className="table-cell w-8">
         <button
           onClick={onToggle}
@@ -1417,6 +1525,149 @@ function AddAssetModal({
           )}
         </form>
       )}
+    </Modal>
+  );
+}
+
+function BulkTagModal({
+  isOpen,
+  onClose,
+  assetIds,
+  tags,
+  allAssets,
+  onDone,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  assetIds: Set<string>;
+  tags: Tag[];
+  allAssets: { id: string; tags?: Tag[] }[] | undefined;
+  onDone: () => void;
+}) {
+  const bulkTag = useBulkTagAssets();
+  const [pendingAdd, setPendingAdd] = useState<Set<string>>(new Set());
+  const [pendingRemove, setPendingRemove] = useState<Set<string>>(new Set());
+
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const assetIdSet = assetIds;
+    allAssets?.forEach((a) => {
+      if (assetIdSet.has(a.id) && a.tags) {
+        a.tags.forEach((t) => counts.set(t.id, (counts.get(t.id) ?? 0) + 1));
+      }
+    });
+    return counts;
+  }, [assetIds, allAssets]);
+
+  const total = assetIds.size;
+
+  const getTagState = (tagId: string): 'all' | 'some' | 'none' => {
+    if (pendingAdd.has(tagId)) return 'all';
+    if (pendingRemove.has(tagId)) return 'none';
+    const count = tagCounts.get(tagId) ?? 0;
+    if (count === 0) return 'none';
+    if (count === total) return 'all';
+    return 'some';
+  };
+
+  const cycleTag = (tagId: string) => {
+    const state = getTagState(tagId);
+    const nextAdd = new Set(pendingAdd);
+    const nextRemove = new Set(pendingRemove);
+
+    if (state === 'none') {
+      nextAdd.add(tagId);
+      nextRemove.delete(tagId);
+    } else if (state === 'all') {
+      nextAdd.delete(tagId);
+      nextRemove.add(tagId);
+    } else {
+      nextAdd.add(tagId);
+      nextRemove.delete(tagId);
+    }
+    setPendingAdd(nextAdd);
+    setPendingRemove(nextRemove);
+  };
+
+  const hasChanges = pendingAdd.size > 0 || pendingRemove.size > 0;
+
+  const handleApply = async () => {
+    const ids = [...assetIds];
+    if (pendingAdd.size > 0) {
+      await bulkTag.mutateAsync({ assetIds: ids, tagIds: [...pendingAdd], action: 'add' });
+    }
+    if (pendingRemove.size > 0) {
+      await bulkTag.mutateAsync({ assetIds: ids, tagIds: [...pendingRemove], action: 'remove' });
+    }
+    setPendingAdd(new Set());
+    setPendingRemove(new Set());
+    onDone();
+    onClose();
+  };
+
+  const handleClose = () => {
+    setPendingAdd(new Set());
+    setPendingRemove(new Set());
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title={`Tag ${total} Asset${total > 1 ? 's' : ''}`} size="sm">
+      <div className="space-y-4">
+        {tags.length > 0 ? (
+          <div className="space-y-2">
+            {tags.map((tag) => {
+              const state = getTagState(tag.id);
+              const count = tagCounts.get(tag.id) ?? 0;
+              const isPending = pendingAdd.has(tag.id) || pendingRemove.has(tag.id);
+              return (
+                <button
+                  key={tag.id}
+                  onClick={() => cycleTag(tag.id)}
+                  className={clsx(
+                    'w-full p-3 rounded-xl text-left transition-all flex items-center justify-between',
+                    state === 'all'
+                      ? 'bg-surface-700/50 border border-surface-600'
+                      : state === 'some'
+                        ? 'bg-surface-700/30 border border-surface-700'
+                        : 'bg-surface-800/30 hover:bg-surface-800/50 border border-transparent'
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color }} />
+                    <div>
+                      <p className={clsx('font-medium', isPending ? 'text-brand-300' : 'text-surface-100')}>{tag.name}</p>
+                      {tag.description && <p className="text-xs text-surface-500">{tag.description}</p>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {state === 'some' && !isPending && (
+                      <span className="text-xs text-surface-500">{count}/{total}</span>
+                    )}
+                    {state === 'all' && <span className="text-brand-400 text-sm">✓</span>}
+                    {state === 'some' && !isPending && <span className="text-amber-400 text-sm">—</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-surface-500 text-center py-8">
+            No tags created yet. Go to Tags page to create some.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3 pt-4 border-t border-surface-700">
+          <button onClick={handleClose} className="btn btn-secondary">Cancel</button>
+          <button
+            onClick={handleApply}
+            disabled={!hasChanges || bulkTag.isPending}
+            className="btn btn-primary"
+          >
+            {bulkTag.isPending ? 'Applying...' : hasChanges ? 'Apply Changes' : 'No Changes'}
+          </button>
+        </div>
+      </div>
     </Modal>
   );
 }

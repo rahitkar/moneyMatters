@@ -2,7 +2,22 @@ import { eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { holdingService } from './holding.service.js';
 import { transactionService } from './transaction.service.js';
+import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 import type { AssetClass } from '../db/schema.js';
+
+const PHYSICAL_METAL_CLASSES = new Set<string>(['gold', 'silver', 'metals']);
+const METAL_SELL_FACTOR = 0.95;
+
+async function getUsdToInr(): Promise<number | null> {
+  const result = await exchangeRateProvider.getRate('USD', 'INR');
+  return result?.rate ?? null;
+}
+
+function convertToInr(value: number, currency: string, usdToInr: number | null): number {
+  if (currency === 'INR') return value;
+  if (currency === 'USD' && usdToInr) return value * usdToInr;
+  return value;
+}
 
 export interface PortfolioSummary {
   totalValue: number;
@@ -42,13 +57,14 @@ const isIndianSymbol = (symbol: string) =>
 
 const GOV_SCHEME_CLASSES = new Set(['ppf', 'epf', 'nps']);
 const METAL_CLASSES = new Set(['gold', 'silver', 'metals']);
-const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended']);
+const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended', 'bonds']);
 
 const MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
 
 function getGeography(assetClass: string, symbol: string): string {
   if (METAL_CLASSES.has(assetClass)) return 'Metals';
   if (CASH_EQUIV_CLASSES.has(assetClass)) return 'Cash & Equivalents';
+  if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
   if (assetClass === 'crypto') return 'Crypto';
   if (GOV_SCHEME_CLASSES.has(assetClass)) return 'India';
   if (MF_CLASSES.has(assetClass)) return 'India';
@@ -66,7 +82,7 @@ function getInstrumentType(assetClass: string): string {
     case 'crypto': return 'Crypto';
     case 'lended': return 'Lended';
     case 'cash': return 'Cash';
-    case 'real_estate': return 'Real Estate';
+    case 'real_estate': case 'vehicle': return 'Physical Assets';
     default: return 'Other';
   }
 }
@@ -76,7 +92,7 @@ function getRiskProfile(assetClass: string): string {
     case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity': return 'Equity';
     case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': case 'ppf': case 'epf': return 'Debt';
     case 'gold': case 'silver': case 'metals': return 'Commodity';
-    case 'crypto': case 'real_estate': case 'nps': return 'Alternative';
+    case 'crypto': case 'real_estate': case 'vehicle': case 'nps': return 'Alternative';
     case 'cash': case 'lended': return 'Cash';
     default: return 'Other';
   }
@@ -100,7 +116,8 @@ function getSubCategory(assetClass: string, symbol: string): string {
     case 'crypto': return 'Crypto';
     case 'cash': return 'Cash';
     case 'bonds': return 'Bonds';
-    case 'real_estate': return 'Real Estate';
+    case 'real_estate': return 'Property';
+    case 'vehicle': return 'Vehicle';
     default: return assetClass;
   }
 }
@@ -137,18 +154,24 @@ export interface HoldingWithValue {
 
 export const portfolioService = {
   async getSummary(): Promise<PortfolioSummary> {
+    const usdToInr = await getUsdToInr();
+
     // Try transaction-based positions first
     const positions = await transactionService.getAllPositions();
     
     if (positions.length > 0) {
-      // Use transaction-based data
       let totalValue = 0;
       let totalCost = 0;
       const assetIds = new Set<string>();
 
       for (const position of positions) {
-        totalValue += position.currentValue;
-        totalCost += position.totalCost;
+        const cur = position.currency || 'INR';
+        const value = convertToInr(position.currentValue, cur, usdToInr);
+        const cost = convertToInr(position.totalCost, cur, usdToInr);
+        const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
+
+        totalValue += value * metalAdj;
+        totalCost += cost;
         assetIds.add(position.assetId);
       }
 
@@ -160,7 +183,7 @@ export const portfolioService = {
         totalCost,
         totalGain,
         totalGainPercent,
-        currency: 'INR', // Indian stocks
+        currency: 'INR',
         assetCount: assetIds.size,
         holdingCount: positions.length,
       };
@@ -175,10 +198,12 @@ export const portfolioService = {
 
     for (const { holding, asset } of holdingsWithAssets) {
       const currentPrice = asset.currentPrice ?? holding.purchasePrice;
-      const value = holding.quantity * currentPrice;
-      const cost = holding.quantity * holding.purchasePrice;
+      const cur = asset.currency || 'USD';
+      const value = convertToInr(holding.quantity * currentPrice, cur, usdToInr);
+      const cost = convertToInr(holding.quantity * holding.purchasePrice, cur, usdToInr);
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(asset.assetClass) ? METAL_SELL_FACTOR : 1;
 
-      totalValue += value;
+      totalValue += value * metalAdj;
       totalCost += cost;
       assetIds.add(asset.id);
     }
@@ -191,13 +216,15 @@ export const portfolioService = {
       totalCost,
       totalGain,
       totalGainPercent,
-      currency: 'USD',
+      currency: 'INR',
       assetCount: assetIds.size,
       holdingCount: holdingsWithAssets.length,
     };
   },
 
   async getAllocation(): Promise<AssetAllocation[]> {
+    const usdToInr = await getUsdToInr();
+
     // Try transaction-based positions first
     const positions = await transactionService.getAllPositions();
     
@@ -206,10 +233,15 @@ export const portfolioService = {
       let totalValue = 0;
 
       for (const position of positions) {
-        totalValue += position.currentValue;
+        const cur = position.currency || 'INR';
+        const rawValue = convertToInr(position.currentValue, cur, usdToInr);
+        const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
+        const value = rawValue * metalAdj;
+
+        totalValue += value;
         const assetClass = position.assetClass as AssetClass;
         const existing = byClass.get(assetClass) || { value: 0, count: 0 };
-        existing.value += position.currentValue;
+        existing.value += value;
         existing.count += 1;
         byClass.set(assetClass, existing);
       }
@@ -237,7 +269,11 @@ export const portfolioService = {
 
     for (const { holding, asset } of holdingsWithAssets) {
       const currentPrice = asset.currentPrice ?? holding.purchasePrice;
-      const value = holding.quantity * currentPrice;
+      const cur = asset.currency || 'USD';
+      const rawValue = convertToInr(holding.quantity * currentPrice, cur, usdToInr);
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(asset.assetClass) ? METAL_SELL_FACTOR : 1;
+      const value = rawValue * metalAdj;
+
       totalValue += value;
 
       const existing = byClass.get(asset.assetClass) || { value: 0, count: 0 };
@@ -256,7 +292,6 @@ export const portfolioService = {
       });
     }
 
-    // Sort by value descending
     allocations.sort((a, b) => b.value - a.value);
 
     return allocations;
@@ -268,7 +303,7 @@ export const portfolioService = {
     
     if (positions.length > 0) {
       return positions.map((position) => ({
-        id: position.assetId, // Use assetId as id
+        id: position.assetId,
         assetId: position.assetId,
         symbol: position.symbol,
         name: position.name,
@@ -280,7 +315,7 @@ export const portfolioService = {
         costBasis: position.totalCost,
         gain: position.unrealizedGain,
         gainPercent: position.unrealizedGainPercent,
-        currency: 'INR',
+        currency: position.currency || 'INR',
       }));
     }
 
@@ -348,6 +383,7 @@ export const portfolioService = {
 
   async getMultiDimensionalAllocation(): Promise<MultiDimensionalAllocation> {
     const positions = await transactionService.getAllPositions();
+    const usdToInr = await getUsdToInr();
 
     const byAssetClass = new Map<string, { value: number; count: number }>();
     const byGeography = new Map<string, { value: number; count: number }>();
@@ -359,8 +395,11 @@ export const portfolioService = {
     let totalValue = 0;
 
     for (const p of positions) {
-      totalValue += p.currentValue;
-      const v = p.currentValue;
+      const cur = p.currency || 'INR';
+      const rawValue = convertToInr(p.currentValue, cur, usdToInr);
+      const metalAdj = PHYSICAL_METAL_CLASSES.has(p.assetClass) ? METAL_SELL_FACTOR : 1;
+      const v = rawValue * metalAdj;
+      totalValue += v;
 
       const addTo = (map: Map<string, { value: number; count: number }>, key: string) => {
         const e = map.get(key) || { value: 0, count: 0 };

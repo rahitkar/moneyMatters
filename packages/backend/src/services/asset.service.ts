@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { Asset, NewAsset, AssetClass, Provider } from '../db/schema.js';
@@ -215,19 +215,42 @@ export const assetService = {
     await db
       .delete(schema.assetTags)
       .where(
-        eq(schema.assetTags.assetId, assetId) 
+        and(eq(schema.assetTags.assetId, assetId), eq(schema.assetTags.tagId, tagId))
       );
   },
 
   async setTags(assetId: string, tagIds: string[]): Promise<void> {
-    // Remove all existing tags
     await db.delete(schema.assetTags).where(eq(schema.assetTags.assetId, assetId));
 
-    // Add new tags
     if (tagIds.length > 0) {
       await db.insert(schema.assetTags).values(
         tagIds.map((tagId) => ({ assetId, tagId }))
       );
     }
+  },
+
+  async bulkAddTags(assetIds: string[], tagIds: string[]): Promise<number> {
+    if (!assetIds.length || !tagIds.length) return 0;
+
+    const rows = assetIds.flatMap((assetId) =>
+      tagIds.map((tagId) => ({ assetId, tagId }))
+    );
+    await db.insert(schema.assetTags).values(rows).onConflictDoNothing();
+    return rows.length;
+  },
+
+  async bulkRemoveTags(assetIds: string[], tagIds: string[]): Promise<number> {
+    if (!assetIds.length || !tagIds.length) return 0;
+
+    let removed = 0;
+    for (const assetId of assetIds) {
+      for (const tagId of tagIds) {
+        await db
+          .delete(schema.assetTags)
+          .where(and(eq(schema.assetTags.assetId, assetId), eq(schema.assetTags.tagId, tagId)));
+        removed++;
+      }
+    }
+    return removed;
   },
 };

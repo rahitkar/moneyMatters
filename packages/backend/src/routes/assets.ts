@@ -37,6 +37,12 @@ const setTagsSchema = z.object({
   tagIds: z.array(z.string()),
 });
 
+const bulkTagsSchema = z.object({
+  assetIds: z.array(z.string()).min(1),
+  tagIds: z.array(z.string()).min(1),
+  action: z.enum(['add', 'remove']),
+});
+
 export async function assetRoutes(fastify: FastifyInstance) {
   // Get all assets (includes tags)
   fastify.get('/', async () => {
@@ -228,6 +234,27 @@ export async function assetRoutes(fastify: FastifyInstance) {
       const updatedAsset = await assetService.getWithTags(request.params.id);
 
       return { asset: updatedAsset };
+    }
+  );
+
+  // Bulk tag multiple assets at once
+  fastify.post<{ Body: z.infer<typeof bulkTagsSchema> }>(
+    '/bulk-tags',
+    async (request, reply) => {
+      const validation = bulkTagsSchema.safeParse(request.body);
+      if (!validation.success) {
+        return reply.status(400).send({ error: validation.error.errors });
+      }
+
+      const { assetIds, tagIds, action } = validation.data;
+
+      if (action === 'add') {
+        const count = await assetService.bulkAddTags(assetIds, tagIds);
+        return { success: true, action, count };
+      } else {
+        const count = await assetService.bulkRemoveTags(assetIds, tagIds);
+        return { success: true, action, count };
+      }
     }
   );
 
