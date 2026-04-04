@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, Fragment } from 'react';
+import { useState, useMemo, useCallback, useEffect, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -280,7 +281,81 @@ function compareFn(a: Position, b: Position, field: SortField, dir: SortDirectio
   return dir === 'asc' ? cmp : -cmp;
 }
 
+type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity';
+
+const ALLOC_MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
+
+function getAllocDimensionLabel(dimension: AllocDimension, assetClass: string, symbol: string, currency: string): string {
+  const indian = isIndianSymbol(symbol);
+  switch (dimension) {
+    case 'byAssetClass':
+      switch (assetClass) {
+        case 'stocks': return 'Stocks'; case 'etf': return 'ETF';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
+        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        default: return assetClass;
+      }
+    case 'bySubCategory':
+      switch (assetClass) {
+        case 'stocks': return indian ? 'Indian Stocks' : 'US Stocks';
+        case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
+        case 'mutual_fund_debt': return 'MF Debt';
+        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        default: return assetClass;
+      }
+    case 'byGeography':
+      if (METAL_CLASSES.includes(assetClass as AssetClass)) return 'Metals';
+      if (CASH_EQUIV_CLASSES.includes(assetClass as AssetClass)) return 'Cash & Equivalents';
+      if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
+      if (assetClass === 'crypto') return 'Crypto';
+      if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass) || ALLOC_MF_CLASSES.has(assetClass)) return 'India';
+      return indian ? 'India' : 'International';
+    case 'byInstrumentType':
+      switch (assetClass) {
+        case 'stocks': return 'Equities'; case 'etf': return 'ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
+        case 'gold': case 'silver': case 'metals': return 'Commodities';
+        case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
+        case 'fixed_deposit': case 'bonds': return 'Fixed Income';
+        case 'crypto': return 'Crypto'; case 'lended': return 'Lended'; case 'cash': return 'Cash';
+        case 'real_estate': case 'vehicle': return 'Physical Assets';
+        default: return 'Other';
+      }
+    case 'byRiskProfile':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'gold': case 'silver': case 'metals': case 'crypto':
+          return 'Growth Investment';
+        case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': return 'Protective Investment';
+        case 'lended': return 'Lended';
+        case 'epf': case 'ppf': case 'nps': return 'Retirement';
+        case 'real_estate': case 'vehicle': return 'Physical Asset';
+        case 'cash': return 'Cash';
+        default: return 'Other';
+      }
+    case 'byLiquidity':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+          return 'Liquid';
+        default: return 'Non-Liquid';
+      }
+    case 'byCurrency':
+      return currency || 'INR';
+  }
+}
+
 export default function Assets() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: positions, isLoading: posLoading } = usePositions();
   const { data: allTransactions, isLoading: txLoading } = useTransactionsWithAssets();
   const { data: allAssets } = useAssets();
@@ -304,6 +379,16 @@ export default function Assets() {
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
+  const [dimensionFilter, setDimensionFilter] = useState<{ dimension: AllocDimension; label: string } | null>(null);
+
+  useEffect(() => {
+    const dim = searchParams.get('dimension') as AllocDimension | null;
+    const label = searchParams.get('label');
+    if (dim && label) {
+      setDimensionFilter({ dimension: dim, label });
+      setSearchParams({}, { replace: true });
+    }
+  }, []);
 
   const isLoading = posLoading || txLoading;
 
@@ -340,12 +425,15 @@ export default function Assets() {
   const filteredPositions = useMemo(() => {
     if (!positions) return [];
     return positions
-      .filter(
-        (p) =>
-          matchesSelection(p, selectedPrimaries, selectedSubs) && matchesColFilters(p, colFilter, assetTagMap)
-      )
+      .filter((p) => {
+        if (dimensionFilter) {
+          const label = getAllocDimensionLabel(dimensionFilter.dimension, p.assetClass, p.symbol, p.currency);
+          if (label !== dimensionFilter.label) return false;
+        }
+        return matchesSelection(p, selectedPrimaries, selectedSubs) && matchesColFilters(p, colFilter, assetTagMap);
+      })
       .sort((a, b) => compareFn(a, b, sortField, sortDir, usdToInr));
-  }, [positions, selectedPrimaries, selectedSubs, sortField, sortDir, colFilter, assetTagMap, usdToInr]);
+  }, [positions, selectedPrimaries, selectedSubs, sortField, sortDir, colFilter, assetTagMap, usdToInr, dimensionFilter]);
 
   const activeFilterCount = useMemo(() => {
     let count = selectedPrimaries.size + selectedSubs.size;
@@ -353,8 +441,9 @@ export default function Assets() {
     if (colFilter.name) count++;
     if (colFilter.assetClass) count++;
     if (colFilter.tagIds.length > 0) count++;
+    if (dimensionFilter) count++;
     return count;
-  }, [colFilter, selectedPrimaries, selectedSubs]);
+  }, [colFilter, selectedPrimaries, selectedSubs, dimensionFilter]);
 
   const togglePrimary = (value: PrimaryCategory) => {
     setSelectedPrimaries((prev) => {
@@ -391,6 +480,7 @@ export default function Assets() {
     setSelectedPrimaries(new Set());
     setSelectedSubs(new Set());
     setColFilter({ ...EMPTY_COL_FILTER });
+    setDimensionFilter(null);
   };
 
   const toggleTagFilter = (tagId: string) =>
@@ -532,6 +622,23 @@ export default function Assets() {
             </p>
           </Card>
         </div>
+        </div>
+      )}
+
+      {/* Dimension filter badge from Dashboard */}
+      {dimensionFilter && (
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs text-surface-500">Filtered by:</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-brand-600/20 text-brand-400 ring-1 ring-brand-500/40">
+            {dimensionFilter.label}
+            <button
+              type="button"
+              onClick={() => setDimensionFilter(null)}
+              className="hover:text-white transition-colors"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </span>
         </div>
       )}
 

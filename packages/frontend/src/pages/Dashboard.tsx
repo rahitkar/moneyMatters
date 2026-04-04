@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
   TrendingDown,
@@ -63,6 +63,88 @@ function getSliceColor(index: number): string {
   return SLICE_COLORS[index % SLICE_COLORS.length];
 }
 
+const isIndianSymbol = (s: string) => s.endsWith('.NS') || s.endsWith('.BO');
+
+const METAL_CLASSES = new Set(['gold', 'silver', 'metals']);
+const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended', 'bonds']);
+const GOV_SCHEME_CLASSES = new Set(['ppf', 'epf', 'nps']);
+const MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
+
+function getDimensionLabel(dimension: AllocDimension, assetClass: string, symbol: string, currency: string): string {
+  const indian = isIndianSymbol(symbol);
+  switch (dimension) {
+    case 'byAssetClass':
+      switch (assetClass) {
+        case 'stocks': return 'Stocks';
+        case 'etf': return 'ETF';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
+        case 'gold': return 'Gold';
+        case 'silver': return 'Silver';
+        case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        default: return assetClass;
+      }
+    case 'bySubCategory':
+      switch (assetClass) {
+        case 'stocks': return indian ? 'Indian Stocks' : 'US Stocks';
+        case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
+        case 'mutual_fund_debt': return 'MF Debt';
+        case 'gold': return 'Gold'; case 'silver': return 'Silver'; case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        default: return assetClass;
+      }
+    case 'byGeography':
+      if (METAL_CLASSES.has(assetClass)) return 'Metals';
+      if (CASH_EQUIV_CLASSES.has(assetClass)) return 'Cash & Equivalents';
+      if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
+      if (assetClass === 'crypto') return 'Crypto';
+      if (GOV_SCHEME_CLASSES.has(assetClass) || MF_CLASSES.has(assetClass)) return 'India';
+      return indian ? 'India' : 'International';
+    case 'byInstrumentType':
+      switch (assetClass) {
+        case 'stocks': return 'Equities';
+        case 'etf': return 'ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
+        case 'gold': case 'silver': case 'metals': return 'Commodities';
+        case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
+        case 'fixed_deposit': case 'bonds': return 'Fixed Income';
+        case 'crypto': return 'Crypto'; case 'lended': return 'Lended';
+        case 'cash': return 'Cash';
+        case 'real_estate': case 'vehicle': return 'Physical Assets';
+        default: return 'Other';
+      }
+    case 'byRiskProfile':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'gold': case 'silver': case 'metals': case 'crypto':
+          return 'Growth Investment';
+        case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit':
+          return 'Protective Investment';
+        case 'lended': return 'Lended';
+        case 'epf': case 'ppf': case 'nps': return 'Retirement';
+        case 'real_estate': case 'vehicle': return 'Physical Asset';
+        case 'cash': return 'Cash';
+        default: return 'Other';
+      }
+    case 'byLiquidity':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+          return 'Liquid';
+        default: return 'Non-Liquid';
+      }
+    case 'byCurrency':
+      return currency || 'INR';
+  }
+}
+
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
   { value: '1W', label: '1W' },
   { value: '1M', label: '1M' },
@@ -72,8 +154,10 @@ const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
 ];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [perfInterval, setPerfInterval] = useState<TimeInterval>('1M');
   const [allocDimension, setAllocDimension] = useState<AllocDimension>('bySubCategory');
+  const [selectedSlice, setSelectedSlice] = useState<string | null>(null);
   const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
   const { data: multiAlloc, isLoading: allocationLoading } = useMultiDimensionalAllocation();
   const { data: holdings } = usePortfolioHoldings();
@@ -83,6 +167,31 @@ export default function Dashboard() {
   const { data: realizedGains } = useRealizedGainsTotal();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = usdInrRate?.rate ?? null;
+
+  const filteredHoldings = useMemo(() => {
+    if (!holdings) return [];
+    if (!selectedSlice) return holdings;
+    return holdings.filter((h) =>
+      getDimensionLabel(allocDimension, h.assetClass, h.symbol, h.currency) === selectedSlice
+    );
+  }, [holdings, selectedSlice, allocDimension]);
+
+  const handleDimensionChange = (dim: AllocDimension) => {
+    setAllocDimension(dim);
+    setSelectedSlice(null);
+  };
+
+  const handleSliceClick = (label: string) => {
+    setSelectedSlice((prev) => (prev === label ? null : label));
+  };
+
+  const handleViewHoldings = () => {
+    if (selectedSlice) {
+      navigate(`/assets?dimension=${allocDimension}&label=${encodeURIComponent(selectedSlice)}`);
+    } else {
+      navigate('/assets');
+    }
+  };
 
   if (summaryLoading || allocationLoading) {
     return <LoadingPage />;
@@ -228,7 +337,7 @@ export default function Dashboard() {
             {DIMENSION_TABS.map((tab) => (
               <button
                 key={tab.value}
-                onClick={() => setAllocDimension(tab.value)}
+                onClick={() => handleDimensionChange(tab.value)}
                 className={clsx(
                   'px-2 py-0.5 rounded text-[11px] font-medium transition-colors',
                   allocDimension === tab.value
@@ -260,9 +369,17 @@ export default function Dashboard() {
                         innerRadius={55}
                         outerRadius={85}
                         paddingAngle={2}
+                        cursor="pointer"
+                        onClick={(_, idx) => handleSliceClick(slices[idx].label)}
                       >
-                        {slices.map((_, idx) => (
-                          <Cell key={idx} fill={getSliceColor(idx)} />
+                        {slices.map((s, idx) => (
+                          <Cell
+                            key={idx}
+                            fill={getSliceColor(idx)}
+                            opacity={selectedSlice && selectedSlice !== s.label ? 0.3 : 1}
+                            stroke={selectedSlice === s.label ? '#fff' : 'none'}
+                            strokeWidth={selectedSlice === s.label ? 2 : 0}
+                          />
                         ))}
                       </Pie>
                       <Tooltip
@@ -276,11 +393,19 @@ export default function Dashboard() {
                     </RechartsPie>
                   </ResponsiveContainer>
                 </div>
-                <div className="space-y-2 mt-3 max-h-64 overflow-y-auto">
+                <div className="space-y-1 mt-3 max-h-64 overflow-y-auto">
                   {slices.map((item, idx) => (
-                    <div
+                    <button
                       key={item.label}
-                      className="flex items-center justify-between"
+                      type="button"
+                      onClick={() => handleSliceClick(item.label)}
+                      className={clsx(
+                        'flex items-center justify-between w-full px-2 py-1 rounded-md transition-colors text-left',
+                        selectedSlice === item.label
+                          ? 'bg-brand-600/20 ring-1 ring-brand-500/40'
+                          : 'hover:bg-surface-800/50',
+                        selectedSlice && selectedSlice !== item.label && 'opacity-40'
+                      )}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <div
@@ -294,7 +419,7 @@ export default function Dashboard() {
                       <span className="text-xs text-surface-400 tabular-nums flex-shrink-0 ml-2">
                         {formatPercent(item.percentage)}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </>
@@ -304,10 +429,26 @@ export default function Dashboard() {
 
         {/* Holdings Table */}
         <Card className="lg:col-span-2 animate-slide-up animate-delay-500">
-          <h2 className="text-lg font-semibold text-surface-100 mb-6">
-            Holdings Overview
-          </h2>
-          {holdings && holdings.length > 0 ? (
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-surface-100">
+              Holdings Overview
+              {selectedSlice && (
+                <span className="text-sm font-normal text-brand-400 ml-2">
+                  — {selectedSlice}
+                </span>
+              )}
+            </h2>
+            {selectedSlice && (
+              <button
+                type="button"
+                onClick={() => setSelectedSlice(null)}
+                className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
+              >
+                Clear filter
+              </button>
+            )}
+          </div>
+          {filteredHoldings.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -319,7 +460,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface-800">
-                  {holdings.slice(0, 10).map((holding) => (
+                  {filteredHoldings.slice(0, 10).map((holding) => (
                     <tr
                       key={holding.id}
                       className="hover:bg-surface-800/30 transition-colors"
@@ -357,19 +498,19 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
-              {holdings.length > 10 && (
-                <div className="text-center pt-4">
-                  <a
-                    href="/holdings"
-                    className="text-sm text-brand-400 hover:text-brand-300"
-                  >
-                    View all {holdings.length} holdings →
-                  </a>
-                </div>
-              )}
+              <div className="text-center pt-4">
+                <button
+                  type="button"
+                  onClick={handleViewHoldings}
+                  className="text-sm text-brand-400 hover:text-brand-300 inline-flex items-center gap-1"
+                >
+                  View {selectedSlice ? filteredHoldings.length : 'all'} holdings
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ) : (
-            <p className="text-surface-500 text-center py-8">No holdings yet</p>
+            <p className="text-surface-500 text-center py-8">No holdings{selectedSlice ? ' in this category' : ' yet'}</p>
           )}
         </Card>
       </div>
