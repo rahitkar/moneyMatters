@@ -13,6 +13,11 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -21,7 +26,6 @@ body {
   font-family: 'Outfit', system-ui, -apple-system, sans-serif;
   background: linear-gradient(135deg, #09090b 0%, #18181b 50%, #0f1410 100%);
   color: #fafafa;
-  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

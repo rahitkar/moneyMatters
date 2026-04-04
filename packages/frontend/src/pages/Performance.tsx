@@ -72,11 +72,12 @@ export default function Performance() {
   const chartData = buildChartData(comparison);
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full min-h-0 animate-fade-in">
+      <div className="flex items-center justify-between shrink-0 mb-6">
         <h1 className="text-2xl font-bold text-surface-100">Performance</h1>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
       {/* Time Interval Selector */}
       <Card padding="sm">
         <div className="flex items-center gap-2 flex-wrap">
@@ -365,6 +366,7 @@ export default function Performance() {
           </div>
         </Card>
       )}
+      </div>
     </div>
   );
 }

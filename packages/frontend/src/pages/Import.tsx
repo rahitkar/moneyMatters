@@ -45,10 +45,12 @@ export default function Import() {
   const [activeTab, setActiveTab] = useState<ImportTab>('zerodha_stocks');
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full min-h-0 animate-fade-in">
+      <div className="flex items-center justify-between shrink-0 mb-6">
         <h1 className="text-2xl font-bold text-surface-100">Import Data</h1>
       </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
 
       {/* Tab Selector */}
       <Card padding="sm">
@@ -95,6 +97,7 @@ export default function Import() {
       {activeTab === 'zerodha_stocks' && <ZerodhaTradebookImport kind="stocks" />}
       {activeTab === 'zerodha_mf' && <ZerodhaTradebookImport kind="mutual_funds" />}
       {activeTab === 'holdings' && <HoldingsImport />}
+      </div>
     </div>
   );
 }

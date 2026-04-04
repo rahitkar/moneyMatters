@@ -561,8 +561,8 @@ export default function Assets() {
   const hasNoPositions = !positions || positions.length === 0;
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full min-h-0 gap-4 animate-fade-in">
+      <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-bold text-surface-100">Assets</h1>
         <div className="flex items-center gap-2">
           <button
@@ -609,12 +609,17 @@ export default function Assets() {
 
       {/* Summary Stats */}
       {totals && (
-        <div className="space-y-2">
-        {usdToInr && (
-          <p className="text-xs text-surface-500 text-right tabular-nums">
-            1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        <div className="space-y-2 shrink-0">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-surface-500 tabular-nums">
+            {filteredPositions.length} asset{filteredPositions.length !== 1 ? 's' : ''}
           </p>
-        )}
+          {usdToInr && (
+            <p className="text-xs text-surface-500 tabular-nums">
+              1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          )}
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <p className="stat-label">Total Value</p>
@@ -653,7 +658,7 @@ export default function Assets() {
 
       {/* Dimension filter badge from Dashboard */}
       {dimensionFilter && (
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 shrink-0">
           <span className="text-xs text-surface-500">Filtered by:</span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-brand-600/20 text-brand-400 ring-1 ring-brand-500/40">
             {dimensionFilter.label}
@@ -669,7 +674,7 @@ export default function Assets() {
       )}
 
       {/* Primary category chips (multi-select) */}
-      <div className="space-y-2">
+      <div className="space-y-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -757,7 +762,7 @@ export default function Assets() {
 
       {/* Expanded Filter Panel */}
       {showFilters && (
-        <Card padding="sm">
+        <Card padding="sm" className="shrink-0">
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
@@ -847,7 +852,7 @@ export default function Assets() {
 
       {/* Bulk action bar */}
       {selectedAssets.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-brand-600/10 border border-brand-500/20 animate-fade-in">
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-brand-600/10 border border-brand-500/20 animate-fade-in shrink-0">
           <CheckSquare className="w-4 h-4 text-brand-400 flex-shrink-0" />
           <span className="text-sm text-surface-200 font-medium">
             {selectedAssets.size} asset{selectedAssets.size > 1 ? 's' : ''} selected
@@ -872,25 +877,25 @@ export default function Assets() {
 
       {/* Positions Table */}
       {filteredPositions.length > 0 ? (
-        <Card padding="sm">
-          <div>
+        <Card padding="sm" className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             <table className="w-full table-fixed">
               <colgroup>
                 {bulkSelectMode && <col className="w-8" />}
                 <col className="w-8" />
-                <col style={{ width: '20%' }} />
-                <col className="w-[72px]" />
+                <col style={{ width: '18%' }} />
+                <col className="w-[68px]" />
                 <col style={{ width: '6%' }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
                 <col style={{ width: '11%' }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '7%' }} />
+                <col style={{ width: '10%' }} />
                 <col style={{ width: '8%' }} />
+                <col style={{ width: '6%' }} />
               </colgroup>
-              <thead>
-                <tr className="border-b border-surface-700">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-surface-700 bg-surface-900">
                   {bulkSelectMode && (
                     <th className="table-header w-8">
                       <input
@@ -908,11 +913,11 @@ export default function Assets() {
                   <SortableHeader field="quantity" label="Qty" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="averageCost" label="Avg Cost" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="currentPrice" label="LTP" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
-                  <SortableHeader field="invested" label="Invested" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="currentValue" label="Current" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <SortableHeader field="invested" label="Invested" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="pnl" label="P&L" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
-                  <SortableHeader field="pnlPercent" label="P&L %" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
-                  <th className="table-header text-right">Updated</th>
+                  <SortableHeader field="pnlPercent" label="P&L%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <th className="table-header text-right">Upd.</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
@@ -957,53 +962,10 @@ export default function Assets() {
                   </Fragment>
                 ))}
               </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-surface-600">
-                  <td className="table-cell" colSpan={bulkSelectMode ? 7 : 6}>
-                    <span className="font-semibold text-surface-100">Total ({filteredPositions.length} assets)</span>
-                  </td>
-                  <td className="table-cell text-right tabular-nums font-semibold text-surface-100">
-                    {totals && (
-                      <>
-                        {formatCurrency(totals.invested, 'INR')}
-                        {totals.investedUsd !== null && (
-                          <span className="block text-[10px] font-normal text-surface-500">{formatCurrency(totals.investedUsd, 'USD')}</span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td className="table-cell text-right tabular-nums font-semibold text-surface-100">
-                    {totals && (
-                      <>
-                        {formatCurrency(totals.current, 'INR')}
-                        {totals.currentUsd !== null && (
-                          <span className="block text-[10px] font-normal text-surface-500">{formatCurrency(totals.currentUsd, 'USD')}</span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td className={clsx('table-cell text-right tabular-nums font-semibold', totals && totals.pnl >= 0 ? 'text-green-400' : 'text-red-400')}>
-                    {totals && (
-                      <>
-                        {totals.pnl >= 0 ? '+' : ''}{formatCurrency(totals.pnl, 'INR')}
-                        {totals.pnlUsd !== null && (
-                          <span className={clsx('block text-[10px] font-normal', totals.pnl >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
-                            {totals.pnl >= 0 ? '+' : ''}{formatCurrency(totals.pnlUsd, 'USD')}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td className={clsx('table-cell text-right tabular-nums font-semibold', totals && totals.pnlPercent >= 0 ? 'text-green-400' : 'text-red-400')}>
-                    {totals && (<>{totals.pnlPercent >= 0 ? '+' : ''}{formatPercent(totals.pnlPercent)}</>)}
-                  </td>
-                  <td className="table-cell"></td>
-                </tr>
-              </tfoot>
             </table>
           </div>
           {filteredPositions.some((p) => PHYSICAL_METAL_CLASSES.has(p.assetClass)) && (
-            <p className="text-[11px] text-surface-500 px-4 pb-3 pt-1">
+            <p className="text-[11px] text-surface-500 px-4 pb-3 pt-1 shrink-0">
               * Physical metal prices reflect Indian rates (import duty + GST) with a 5% deduction for making charges, impurities & wear.
             </p>
           )}
@@ -1308,13 +1270,13 @@ function PositionRow({
           )
           : '—'}
       </td>
-      <td className="table-cell text-right tabular-nums">
-        <CurrencyValue value={position.totalCost} currency={cur} usdToInr={usdToInr} />
-      </td>
       <td className="table-cell text-right tabular-nums font-medium text-surface-100">
         <span title={isMetal ? 'After 5% selling deduction' : undefined}>
           <CurrencyValue value={adjValue} currency={cur} usdToInr={usdToInr} />
         </span>
+      </td>
+      <td className="table-cell text-right tabular-nums">
+        <CurrencyValue value={position.totalCost} currency={cur} usdToInr={usdToInr} />
       </td>
       <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
         <CurrencyValue value={adjGain} currency={cur} usdToInr={usdToInr} sign />

@@ -32,7 +32,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const mainMargin = collapsed ? 'ml-[68px]' : 'ml-64';
 
   return (
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       {/* Sidebar */}
       <aside
         className={clsx(
@@ -122,8 +122,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className={clsx('flex-1 transition-all duration-300 ease-in-out', mainMargin)}>
-        <div className="p-8 max-w-7xl mx-auto">{children}</div>
+      <main className={clsx('flex-1 h-screen overflow-hidden transition-all duration-300 ease-in-out', mainMargin)}>
+        <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">{children}</div>
       </main>
     </div>
   );

@@ -46,8 +46,8 @@ export default function Tags() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full min-h-0 animate-fade-in">
+      <div className="flex items-center justify-between shrink-0 mb-6">
         <h1 className="text-2xl font-bold text-surface-100">Tags</h1>
         <button
           onClick={() => setIsAddModalOpen(true)}
@@ -58,6 +58,7 @@ export default function Tags() {
         </button>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -118,6 +119,7 @@ export default function Tags() {
             </Card>
           )}
         </div>
+      </div>
       </div>
 
       {/* Add/Edit Modal */}

@@ -279,14 +279,15 @@ export default function Dashboard() {
   const isPositive = summary.totalGain >= 0;
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full min-h-0 animate-fade-in">
+      <div className="flex items-center justify-between shrink-0 mb-6">
         <h1 className="text-2xl font-bold text-surface-100">Dashboard</h1>
         <p className="text-sm text-surface-500">
           {summary.holdingCount} holdings across {summary.assetCount} assets
         </p>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-8 pr-1">
       {/* Summary Stats */}
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-6">
@@ -802,6 +803,7 @@ export default function Dashboard() {
             </p>
           )}
         </Card>
+      </div>
       </div>
     </div>
   );
