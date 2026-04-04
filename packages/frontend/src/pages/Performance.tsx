@@ -20,6 +20,7 @@ import {
   usePerformanceByAssetClass,
   useBenchmarks,
   useRealizedGainsTotal,
+  useExchangeRate,
 } from '../api/hooks';
 import { formatCurrency, formatPercent, formatDate } from '../lib/format';
 import type { TimeInterval } from '../api/types';
@@ -54,6 +55,8 @@ export default function Performance() {
   const { data: comparison, isLoading } = usePerformanceComparison(interval, selectedBenchmarks);
   const { data: assetClassPerf } = usePerformanceByAssetClass(interval);
   const { data: realizedGains } = useRealizedGainsTotal();
+  const { data: usdInrRate } = useExchangeRate('USD', 'INR');
+  const usdToInr = usdInrRate?.rate ?? null;
 
   const toggleBenchmark = (symbol: string) => {
     setSelectedBenchmarks((prev) =>
@@ -98,28 +101,32 @@ export default function Performance() {
       {comparison && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Portfolio Return"
-            value={formatPercent(comparison.portfolio.percentageReturn)}
-            subValue={formatCurrency(comparison.portfolio.absoluteReturn)}
+            label="P&L %"
+            value={`${comparison.portfolio.percentageReturn >= 0 ? '+' : ''}${formatPercent(comparison.portfolio.percentageReturn)}`}
+            subValue={`${comparison.portfolio.percentageReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}`}
             isPositive={comparison.portfolio.percentageReturn >= 0}
             icon={comparison.portfolio.percentageReturn >= 0 ? TrendingUp : TrendingDown}
           />
           <StatCard
-            label="Current Value"
-            value={formatCurrency(comparison.portfolio.endValue)}
-            subValue={`Cost: ${formatCurrency(comparison.portfolio.totalCost)}`}
+            label="Total Value"
+            value={formatCurrency(comparison.portfolio.endValue, 'INR')}
+            usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.endValue / usdToInr, 'USD') : undefined}
+            subValue={`Invested: ${formatCurrency(comparison.portfolio.totalCost, 'INR')}`}
             isPositive={true}
+            neutral
             icon={Activity}
           />
           <StatCard
-            label="Unrealized Gains"
-            value={formatCurrency(comparison.portfolio.unrealizedGains)}
+            label="Total P&L"
+            value={formatCurrency(comparison.portfolio.unrealizedGains, 'INR')}
+            usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.unrealizedGains / usdToInr, 'USD') : undefined}
             isPositive={comparison.portfolio.unrealizedGains >= 0}
             icon={BarChart3}
           />
           <StatCard
-            label="Realized Gains"
-            value={formatCurrency(realizedGains ?? 0)}
+            label="Realized P&L"
+            value={formatCurrency(realizedGains ?? 0, 'INR')}
+            usdSubValue={usdToInr ? formatCurrency((realizedGains ?? 0) / usdToInr, 'USD') : undefined}
             isPositive={(realizedGains ?? 0) >= 0}
             icon={BarChart3}
           />
@@ -236,9 +243,9 @@ export default function Performance() {
                 <tr className="border-b border-surface-700">
                   <th className="table-header">Asset Class</th>
                   <th className="table-header text-right">Holdings</th>
-                  <th className="table-header text-right">Current Value</th>
-                  <th className="table-header text-right">Return</th>
-                  <th className="table-header text-right">Realized Gains</th>
+                  <th className="table-header text-right">Total Value</th>
+                  <th className="table-header text-right">P&L %</th>
+                  <th className="table-header text-right">Realized P&L</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
@@ -251,7 +258,7 @@ export default function Performance() {
                       {item.holdings}
                     </td>
                     <td className="table-cell text-right tabular-nums">
-                      {formatCurrency(item.currentValue)}
+                      {formatCurrency(item.currentValue, 'INR')}
                     </td>
                     <td
                       className={clsx(
@@ -272,7 +279,7 @@ export default function Performance() {
                           : 'text-red-400'
                       )}
                     >
-                      {formatCurrency(item.performance.realizedGains)}
+                      {formatCurrency(item.performance.realizedGains, 'INR')}
                     </td>
                   </tr>
                 ))}
@@ -308,10 +315,10 @@ export default function Performance() {
                   </td>
                   <td className="table-cell text-surface-400">—</td>
                   <td className="table-cell text-right tabular-nums">
-                    {formatCurrency(comparison.portfolio.startValue)}
+                    {formatCurrency(comparison.portfolio.startValue, 'INR')}
                   </td>
                   <td className="table-cell text-right tabular-nums">
-                    {formatCurrency(comparison.portfolio.endValue)}
+                    {formatCurrency(comparison.portfolio.endValue, 'INR')}
                   </td>
                   <td
                     className={clsx(
@@ -361,14 +368,18 @@ function StatCard({
   label,
   value,
   subValue,
+  usdSubValue,
   isPositive,
   icon: Icon,
+  neutral,
 }: {
   label: string;
   value: string;
   subValue?: string;
+  usdSubValue?: string;
   isPositive: boolean;
   icon: React.ElementType;
+  neutral?: boolean;
 }) {
   return (
     <Card>
@@ -378,21 +389,26 @@ function StatCard({
           <p
             className={clsx(
               'text-2xl font-bold',
-              isPositive ? 'text-green-400' : 'text-red-400'
+              neutral ? 'text-surface-100' : isPositive ? 'text-green-400' : 'text-red-400'
             )}
           >
             {value}
           </p>
+          {usdSubValue && (
+            <p className={clsx('text-[10px] mt-0.5', neutral ? 'text-surface-500' : isPositive ? 'text-green-400/60' : 'text-red-400/60')}>
+              {usdSubValue}
+            </p>
+          )}
           {subValue && <p className="text-sm text-surface-500 mt-1">{subValue}</p>}
         </div>
         <div
           className={clsx(
             'p-3 rounded-xl',
-            isPositive ? 'bg-green-500/20' : 'bg-red-500/20'
+            neutral ? 'bg-surface-700/50' : isPositive ? 'bg-green-500/20' : 'bg-red-500/20'
           )}
         >
           <Icon
-            className={clsx('w-5 h-5', isPositive ? 'text-green-400' : 'text-red-400')}
+            className={clsx('w-5 h-5', neutral ? 'text-surface-400' : isPositive ? 'text-green-400' : 'text-red-400')}
           />
         </div>
       </div>

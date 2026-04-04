@@ -501,17 +501,17 @@ export default function Assets() {
         )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
-            <p className="stat-label">Total Invested</p>
-            <p className="stat-value text-surface-100">{formatCurrency(totals.invested, 'INR')}</p>
-            {totals.investedUsd !== null && (
-              <p className="text-xs text-surface-500 mt-0.5">{formatCurrency(totals.investedUsd, 'USD')}</p>
-            )}
-          </Card>
-          <Card>
-            <p className="stat-label">Current Value</p>
+            <p className="stat-label">Total Value</p>
             <p className="stat-value text-surface-100">{formatCurrency(totals.current, 'INR')}</p>
             {totals.currentUsd !== null && (
               <p className="text-xs text-surface-500 mt-0.5">{formatCurrency(totals.currentUsd, 'USD')}</p>
+            )}
+          </Card>
+          <Card>
+            <p className="stat-label">Current Invested</p>
+            <p className="stat-value text-surface-100">{formatCurrency(totals.invested, 'INR')}</p>
+            {totals.investedUsd !== null && (
+              <p className="text-xs text-surface-500 mt-0.5">{formatCurrency(totals.investedUsd, 'USD')}</p>
             )}
           </Card>
           <Card>
@@ -526,7 +526,7 @@ export default function Assets() {
             )}
           </Card>
           <Card>
-            <p className="stat-label">Total P&L %</p>
+            <p className="stat-label">P&L %</p>
             <p className={clsx('stat-value', totals.pnlPercent >= 0 ? 'text-green-400' : 'text-red-400')}>
               {totals.pnlPercent >= 0 ? '+' : ''}{formatPercent(totals.pnlPercent)}
             </p>

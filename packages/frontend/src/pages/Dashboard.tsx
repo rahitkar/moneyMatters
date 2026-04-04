@@ -125,8 +125,11 @@ export default function Dashboard() {
             <div>
               <p className="stat-label">Total Value</p>
               <p className="stat-value text-surface-100">
-                {formatCurrency(summary.totalValue, summary.currency)}
+                {formatCurrency(summary.totalValue, 'INR')}
               </p>
+              {usdToInr && (
+                <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(summary.totalValue / usdToInr, 'USD')}</p>
+              )}
             </div>
             <div className="p-3 rounded-xl bg-brand-500/20">
               <DollarSign className="w-6 h-6 text-brand-400" />
@@ -137,10 +140,13 @@ export default function Dashboard() {
         <Card className="animate-slide-up animate-delay-100">
           <div className="flex items-start justify-between">
             <div>
-              <p className="stat-label">Total Cost</p>
+              <p className="stat-label">Current Invested</p>
               <p className="stat-value text-surface-100">
-                {formatCurrency(summary.totalCost, summary.currency)}
+                {formatCurrency(summary.totalCost, 'INR')}
               </p>
+              {usdToInr && (
+                <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(summary.totalCost / usdToInr, 'USD')}</p>
+              )}
             </div>
             <div className="p-3 rounded-xl bg-surface-700/50">
               <Wallet className="w-6 h-6 text-surface-400" />
@@ -151,7 +157,7 @@ export default function Dashboard() {
         <Card className="animate-slide-up animate-delay-200">
           <div className="flex items-start justify-between">
             <div>
-              <p className="stat-label">Total Gain/Loss</p>
+              <p className="stat-label">Total P&L</p>
               <p
                 className={clsx(
                   'stat-value',
@@ -159,8 +165,13 @@ export default function Dashboard() {
                 )}
               >
                 {isPositive ? '+' : ''}
-                {formatCurrency(summary.totalGain, summary.currency)}
+                {formatCurrency(summary.totalGain, 'INR')}
               </p>
+              {usdToInr && (
+                <p className={clsx('text-[10px] mt-0.5', isPositive ? 'text-green-400/60' : 'text-red-400/60')}>
+                  {isPositive ? '+' : ''}{formatCurrency(summary.totalGain / usdToInr, 'USD')}
+                </p>
+              )}
             </div>
             <div
               className={clsx(
@@ -180,7 +191,7 @@ export default function Dashboard() {
         <Card className="animate-slide-up animate-delay-300">
           <div className="flex items-start justify-between">
             <div>
-              <p className="stat-label">Return %</p>
+              <p className="stat-label">P&L %</p>
               <p
                 className={clsx(
                   'stat-value',
@@ -259,7 +270,7 @@ export default function Dashboard() {
                           border: '1px solid #3f3f46',
                           borderRadius: '12px',
                         }}
-                        formatter={(value: number) => formatCurrency(value)}
+                        formatter={(value: number) => formatCurrency(value, 'INR')}
                       />
                     </RechartsPie>
                   </ResponsiveContainer>
@@ -303,7 +314,7 @@ export default function Dashboard() {
                     <th className="table-header">Asset</th>
                     <th className="table-header text-right">Quantity</th>
                     <th className="table-header text-right">Value</th>
-                    <th className="table-header text-right">Gain/Loss</th>
+                    <th className="table-header text-right">P&L</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface-800">
@@ -391,7 +402,7 @@ export default function Dashboard() {
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="p-3 rounded-xl bg-surface-800/30">
-                <p className="text-xs text-surface-500 mb-1">Return ({perfInterval})</p>
+                <p className="text-xs text-surface-500 mb-1">P&L % ({perfInterval})</p>
                 <p
                   className={clsx(
                     'text-lg font-bold',
@@ -403,7 +414,7 @@ export default function Dashboard() {
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-surface-800/30">
-                <p className="text-xs text-surface-500 mb-1">Absolute Return</p>
+                <p className="text-xs text-surface-500 mb-1">Total P&L</p>
                 <p
                   className={clsx(
                     'text-lg font-bold',
@@ -411,30 +422,45 @@ export default function Dashboard() {
                   )}
                 >
                   {performance.absoluteReturn >= 0 ? '+' : ''}
-                  {formatCurrency(performance.absoluteReturn)}
+                  {formatCurrency(performance.absoluteReturn, 'INR')}
                 </p>
+                {usdToInr && (
+                  <p className={clsx('text-[10px]', performance.absoluteReturn >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
+                    {performance.absoluteReturn >= 0 ? '+' : ''}{formatCurrency(performance.absoluteReturn / usdToInr, 'USD')}
+                  </p>
+                )}
               </div>
               <div className="p-3 rounded-xl bg-surface-800/30">
-                <p className="text-xs text-surface-500 mb-1">Unrealized</p>
+                <p className="text-xs text-surface-500 mb-1">Unrealized P&L</p>
                 <p
                   className={clsx(
                     'text-lg font-bold',
                     performance.unrealizedGains >= 0 ? 'text-green-400' : 'text-red-400'
                   )}
                 >
-                  {formatCurrency(performance.unrealizedGains)}
+                  {formatCurrency(performance.unrealizedGains, 'INR')}
                 </p>
+                {usdToInr && (
+                  <p className={clsx('text-[10px]', performance.unrealizedGains >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
+                    {formatCurrency(performance.unrealizedGains / usdToInr, 'USD')}
+                  </p>
+                )}
               </div>
               <div className="p-3 rounded-xl bg-surface-800/30">
-                <p className="text-xs text-surface-500 mb-1">Realized</p>
+                <p className="text-xs text-surface-500 mb-1">Realized P&L</p>
                 <p
                   className={clsx(
                     'text-lg font-bold',
                     (realizedGains ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'
                   )}
                 >
-                  {formatCurrency(realizedGains ?? 0)}
+                  {formatCurrency(realizedGains ?? 0, 'INR')}
                 </p>
+                {usdToInr && (
+                  <p className={clsx('text-[10px]', (realizedGains ?? 0) >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
+                    {formatCurrency((realizedGains ?? 0) / usdToInr, 'USD')}
+                  </p>
+                )}
               </div>
             </div>
             <div className="h-48">
@@ -450,7 +476,7 @@ export default function Dashboard() {
                   <YAxis
                     stroke="#71717a"
                     fontSize={11}
-                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
                   />
                   <Tooltip
                     contentStyle={{
@@ -459,7 +485,7 @@ export default function Dashboard() {
                       borderRadius: '12px',
                     }}
                     labelFormatter={(d) => formatDate(d)}
-                    formatter={(value: number) => [formatCurrency(value), 'Value']}
+                    formatter={(value: number) => [formatCurrency(value, 'INR'), 'Value']}
                   />
                   <Line
                     type="monotone"

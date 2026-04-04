@@ -113,6 +113,9 @@ export default function Transactions() {
           <p className="stat-value text-surface-100">
             {formatCurrency(stats.totalBuyValue, 'INR')}
           </p>
+          {usdToInr && (
+            <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(stats.totalBuyValue / usdToInr, 'USD')}</p>
+          )}
         </Card>
         <Card>
           <p className="stat-label">Realized P&L</p>
@@ -125,6 +128,11 @@ export default function Transactions() {
             {stats.realizedGain >= 0 ? '+' : ''}
             {formatCurrency(stats.realizedGain, 'INR')}
           </p>
+          {usdToInr && (
+            <p className={clsx('text-[10px] mt-0.5', stats.realizedGain >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
+              {stats.realizedGain >= 0 ? '+' : ''}{formatCurrency(stats.realizedGain / usdToInr, 'USD')}
+            </p>
+          )}
           {stats.realizedPct !== 0 && (
             <p
               className={clsx(
@@ -148,6 +156,11 @@ export default function Transactions() {
             {stats.unrealizedGain >= 0 ? '+' : ''}
             {formatCurrency(stats.unrealizedGain, 'INR')}
           </p>
+          {usdToInr && (
+            <p className={clsx('text-[10px] mt-0.5', stats.unrealizedGain >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
+              {stats.unrealizedGain >= 0 ? '+' : ''}{formatCurrency(stats.unrealizedGain / usdToInr, 'USD')}
+            </p>
+          )}
           {stats.unrealizedPct !== 0 && (
             <p
               className={clsx(

@@ -12,9 +12,10 @@ import {
   useCreateTag,
   useUpdateTag,
   useDeleteTag,
-  usePortfolioHoldings,
+  useExchangeRate,
 } from '../api/hooks';
 import { formatCurrency } from '../lib/format';
+import CurrencyValue, { toInr } from '../components/CurrencyValue';
 import type { Tag, TagWithCount, HoldingWithValue } from '../api/types';
 import { api } from '../api/client';
 import { useQuery } from '@tanstack/react-query';
@@ -34,6 +35,8 @@ const PRESET_COLORS = [
 
 export default function Tags() {
   const { data: tags, isLoading } = useTagsWithCounts();
+  const { data: usdInrRate } = useExchangeRate('USD', 'INR');
+  const usdToInr = usdInrRate?.rate ?? null;
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<TagWithCount | null>(null);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -98,7 +101,7 @@ export default function Tags() {
         {/* Tag Details / View */}
         <div className="lg:col-span-2">
           {selectedTagId ? (
-            <TagHoldingsView tagId={selectedTagId} tags={tags || []} />
+            <TagHoldingsView tagId={selectedTagId} tags={tags || []} usdToInr={usdToInr} />
           ) : (
             <Card>
               <EmptyState
@@ -191,9 +194,11 @@ function TagItem({
 function TagHoldingsView({
   tagId,
   tags,
+  usdToInr,
 }: {
   tagId: string;
   tags: TagWithCount[];
+  usdToInr: number | null;
 }) {
   const tag = tags.find((t) => t.id === tagId);
   const { data: holdings, isLoading } = useQuery({
@@ -216,8 +221,8 @@ function TagHoldingsView({
 
   if (!tag) return null;
 
-  const totalValue = holdings?.reduce((sum, h) => sum + h.currentValue, 0) || 0;
-  const totalGain = holdings?.reduce((sum, h) => sum + h.gain, 0) || 0;
+  const totalValue = holdings?.reduce((sum, h) => sum + toInr(h.currentValue, h.currency || 'INR', usdToInr), 0) || 0;
+  const totalGain = holdings?.reduce((sum, h) => sum + toInr(h.gain, h.currency || 'INR', usdToInr), 0) || 0;
   const isPositive = totalGain >= 0;
 
   return (
@@ -248,11 +253,14 @@ function TagHoldingsView({
         <div className="p-4 rounded-xl bg-surface-800/50">
           <p className="text-sm text-surface-400">Total Value</p>
           <p className="text-xl font-semibold text-surface-100">
-            {formatCurrency(totalValue)}
+            {formatCurrency(totalValue, 'INR')}
           </p>
+          {usdToInr && (
+            <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(totalValue / usdToInr, 'USD')}</p>
+          )}
         </div>
         <div className="p-4 rounded-xl bg-surface-800/50">
-          <p className="text-sm text-surface-400">Total Gain</p>
+          <p className="text-sm text-surface-400">Total P&L</p>
           <p
             className={clsx(
               'text-xl font-semibold',
@@ -260,8 +268,13 @@ function TagHoldingsView({
             )}
           >
             {isPositive ? '+' : ''}
-            {formatCurrency(totalGain)}
+            {formatCurrency(totalGain, 'INR')}
           </p>
+          {usdToInr && (
+            <p className={clsx('text-[10px] mt-0.5', isPositive ? 'text-green-400/60' : 'text-red-400/60')}>
+              {isPositive ? '+' : ''}{formatCurrency(totalGain / usdToInr, 'USD')}
+            </p>
+          )}
         </div>
       </div>
 
@@ -273,7 +286,7 @@ function TagHoldingsView({
               <tr className="border-b border-surface-700">
                 <th className="table-header">Asset</th>
                 <th className="table-header text-right">Value</th>
-                <th className="table-header text-right">Gain/Loss</th>
+                <th className="table-header text-right">P&L</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-800">
@@ -294,7 +307,7 @@ function TagHoldingsView({
                     </div>
                   </td>
                   <td className="table-cell text-right tabular-nums">
-                    {formatCurrency(holding.currentValue, holding.currency)}
+                    <CurrencyValue value={holding.currentValue} currency={holding.currency || 'INR'} usdToInr={usdToInr} />
                   </td>
                   <td
                     className={clsx(
@@ -302,8 +315,7 @@ function TagHoldingsView({
                       holding.gain >= 0 ? 'text-green-400' : 'text-red-400'
                     )}
                   >
-                    {holding.gain >= 0 ? '+' : ''}
-                    {formatCurrency(holding.gain, holding.currency)}
+                    <CurrencyValue value={holding.gain} currency={holding.currency || 'INR'} usdToInr={usdToInr} sign />
                   </td>
                 </tr>
               ))}
