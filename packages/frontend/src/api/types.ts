@@ -10,6 +10,11 @@ export type AssetClass =
   | 'gold'
   | 'silver'
   | 'metals'
+  | 'ppf'
+  | 'epf'
+  | 'nps'
+  | 'fixed_deposit'
+  | 'lended'
   | 'cash';
 
 export type Provider = 'yahoo_finance' | 'coingecko' | 'metals_api' | 'manual';
@@ -91,6 +96,22 @@ export interface AssetAllocation {
   value: number;
   percentage: number;
   count: number;
+}
+
+export interface DimensionSlice {
+  label: string;
+  value: number;
+  percentage: number;
+  count: number;
+}
+
+export interface MultiDimensionalAllocation {
+  byAssetClass: DimensionSlice[];
+  byGeography: DimensionSlice[];
+  byInstrumentType: DimensionSlice[];
+  byRiskProfile: DimensionSlice[];
+  byCurrency: DimensionSlice[];
+  bySubCategory: DimensionSlice[];
 }
 
 export interface MarketQuote {

@@ -16,6 +16,11 @@ const ASSET_CLASS_CONFIG: Record<
   gold: { label: 'Gold', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
   silver: { label: 'Silver', color: 'text-slate-300', bg: 'bg-slate-400/20' },
   metals: { label: 'Metals', color: 'text-amber-400', bg: 'bg-amber-500/20' },
+  ppf: { label: 'PPF', color: 'text-teal-300', bg: 'bg-teal-400/20' },
+  epf: { label: 'EPF', color: 'text-teal-400', bg: 'bg-teal-500/20' },
+  nps: { label: 'NPS', color: 'text-cyan-400', bg: 'bg-cyan-500/20' },
+  fixed_deposit: { label: 'Fixed Deposit', color: 'text-emerald-300', bg: 'bg-emerald-400/20' },
+  lended: { label: 'Lended', color: 'text-orange-300', bg: 'bg-orange-400/20' },
   cash: { label: 'Cash', color: 'text-green-400', bg: 'bg-green-500/20' },
 };
 
@@ -57,6 +62,11 @@ export function getAssetClassColor(assetClass: AssetClass): string {
     gold: '#eab308',
     silver: '#94a3b8',
     metals: '#f59e0b',
+    ppf: '#5eead4',
+    epf: '#2dd4bf',
+    nps: '#22d3ee',
+    fixed_deposit: '#6ee7b7',
+    lended: '#fdba74',
     cash: '#22c55e',
   };
   return colors[assetClass];

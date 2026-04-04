@@ -42,56 +42,126 @@ import CurrencyValue, { toInr } from '../components/CurrencyValue';
 const isIndianSymbol = (symbol: string) =>
   symbol.endsWith('.NS') || symbol.endsWith('.BO');
 
-type FilterCategory =
-  | 'all'
-  | 'in_stocks'
-  | 'in_etf'
-  | 'intl_stocks'
-  | 'intl_etf'
-  | 'mf_equity'
-  | 'mf_debt'
-  | 'crypto'
-  | 'bonds'
-  | 'real_estate'
-  | 'metals'
-  | 'cash';
+// ── Hierarchical filter system ──────────────────────────────────
 
-type QuickFilterCategory = Exclude<FilterCategory, 'all'>;
+type PrimaryCategory = 'all' | 'india' | 'international' | 'metals' | 'crypto' | 'cash_equiv';
 
-const FILTER_OPTIONS: { value: QuickFilterCategory; label: string }[] = [
-  { value: 'in_stocks', label: 'Indian Stocks' },
-  { value: 'in_etf', label: 'Indian ETFs' },
-  { value: 'intl_stocks', label: 'Intl. Stocks' },
-  { value: 'intl_etf', label: 'Intl. ETFs' },
-  { value: 'mf_equity', label: 'MF Equity' },
-  { value: 'mf_debt', label: 'MF Debt' },
-  { value: 'crypto', label: 'Crypto' },
-  { value: 'bonds', label: 'Bonds' },
-  { value: 'real_estate', label: 'Real Estate' },
+interface SubFilterDef {
+  value: string;
+  label: string;
+  children?: { value: string; label: string }[];
+}
+
+const GOV_SCHEME_CLASSES: AssetClass[] = ['ppf', 'epf', 'nps'];
+const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'lended'];
+
+const PRIMARY_CATEGORIES: { value: PrimaryCategory; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'india', label: 'India' },
+  { value: 'international', label: 'International' },
   { value: 'metals', label: 'Metals' },
-  { value: 'cash', label: 'Cash' },
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'cash_equiv', label: 'Cash & Equivalents' },
 ];
 
-const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+const SUB_FILTERS: Record<PrimaryCategory, SubFilterDef[]> = {
+  all: [],
+  india: [
+    { value: 'all', label: 'All' },
+    { value: 'in_stocks', label: 'Stocks' },
+    { value: 'in_etf', label: 'ETFs' },
+    { value: 'mf_equity', label: 'MF Equity' },
+    { value: 'mf_debt', label: 'MF Debt' },
+    {
+      value: 'gov_schemes', label: 'Gov Schemes',
+      children: [
+        { value: 'ppf', label: 'PPF' },
+        { value: 'epf', label: 'EPF' },
+        { value: 'nps', label: 'NPS' },
+      ],
+    },
+  ],
+  international: [
+    { value: 'all', label: 'All' },
+    { value: 'us_stocks', label: 'US Stocks' },
+    { value: 'us_etf', label: 'US ETFs' },
+    { value: 'other_intl', label: 'Other' },
+  ],
+  metals: [
+    { value: 'all', label: 'All' },
+    { value: 'gold', label: 'Gold' },
+    { value: 'silver', label: 'Silver' },
+    { value: 'other_metals', label: 'Other Metals' },
+  ],
+  crypto: [],
+  cash_equiv: [
+    { value: 'all', label: 'All' },
+    { value: 'cash', label: 'Cash (Savings)' },
+    { value: 'fixed_deposit', label: 'Fixed Deposit' },
+    { value: 'lended', label: 'Lended' },
+  ],
+};
 
-function matchesFilter(p: Position, filter: FilterCategory): boolean {
-  if (filter === 'all') return true;
+const MF_CLASSES: AssetClass[] = ['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt'];
+
+function getAssetPrimaryCategory(assetClass: string, symbol: string): PrimaryCategory {
+  if (METAL_CLASSES.includes(assetClass as AssetClass)) return 'metals';
+  if (CASH_EQUIV_CLASSES.includes(assetClass as AssetClass)) return 'cash_equiv';
+  if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass)) return 'india';
+  if (MF_CLASSES.includes(assetClass as AssetClass)) return 'india';
+  if (assetClass === 'crypto') return 'crypto';
+  if (assetClass === 'stocks' || assetClass === 'etf') {
+    return isIndianSymbol(symbol) ? 'india' : 'international';
+  }
+  return isIndianSymbol(symbol) ? 'india' : 'international';
+}
+
+function matchesSubFilter(p: Position, sub: string): boolean {
   const indian = isIndianSymbol(p.symbol);
-  switch (filter) {
+  switch (sub) {
     case 'in_stocks': return p.assetClass === 'stocks' && indian;
     case 'in_etf': return p.assetClass === 'etf' && indian;
-    case 'intl_stocks': return p.assetClass === 'stocks' && !indian;
-    case 'intl_etf': return p.assetClass === 'etf' && !indian;
     case 'mf_equity': return p.assetClass === 'mutual_fund_equity' || p.assetClass === 'mutual_fund';
     case 'mf_debt': return p.assetClass === 'mutual_fund_debt';
-    case 'metals': return METAL_CLASSES.includes(p.assetClass);
-    default: return p.assetClass === filter;
+    case 'gov_schemes': return GOV_SCHEME_CLASSES.includes(p.assetClass);
+    case 'ppf': return p.assetClass === 'ppf';
+    case 'epf': return p.assetClass === 'epf';
+    case 'nps': return p.assetClass === 'nps';
+    case 'us_stocks': return p.assetClass === 'stocks' && !indian;
+    case 'us_etf': return p.assetClass === 'etf' && !indian;
+    case 'other_intl': return getAssetPrimaryCategory(p.assetClass, p.symbol) === 'international' && p.assetClass !== 'stocks' && p.assetClass !== 'etf';
+    case 'gold': return p.assetClass === 'gold';
+    case 'silver': return p.assetClass === 'silver';
+    case 'other_metals': return p.assetClass === 'metals';
+    case 'cash': return p.assetClass === 'cash';
+    case 'fixed_deposit': return p.assetClass === 'fixed_deposit';
+    case 'lended': return p.assetClass === 'lended';
+    default: return false;
   }
 }
 
-function matchesQuickFilters(p: Position, selected: QuickFilterCategory[]): boolean {
-  if (selected.length === 0) return true;
-  return selected.some((f) => matchesFilter(p, f));
+function getSubsForPrimary(primary: PrimaryCategory, subs: Set<string>): string[] {
+  const allSubValues = SUB_FILTERS[primary]
+    .flatMap((sf) => [sf.value, ...(sf.children?.map((c) => c.value) ?? [])]);
+  return allSubValues.filter((v) => v !== 'all' && subs.has(v));
+}
+
+function matchesSelection(p: Position, primaries: Set<PrimaryCategory>, subs: Set<string>): boolean {
+  if (primaries.size === 0 && subs.size === 0) return true;
+
+  const assetPrimary = getAssetPrimaryCategory(p.assetClass, p.symbol);
+
+  for (const sub of subs) {
+    if (matchesSubFilter(p, sub)) return true;
+  }
+
+  for (const primary of primaries) {
+    const activeSubs = getSubsForPrimary(primary, subs);
+    if (activeSubs.length === 0 && assetPrimary === primary) return true;
+  }
+
+  return false;
 }
 
 interface ColFilter {
@@ -134,6 +204,11 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'gold', label: 'Gold' },
   { value: 'silver', label: 'Silver' },
   { value: 'metals', label: 'Other Metals' },
+  { value: 'ppf', label: 'PPF' },
+  { value: 'epf', label: 'EPF' },
+  { value: 'nps', label: 'NPS' },
+  { value: 'fixed_deposit', label: 'Fixed Deposit' },
+  { value: 'lended', label: 'Lended' },
   { value: 'cash', label: 'Cash' },
 ];
 
@@ -189,7 +264,8 @@ export default function Assets() {
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<{ assetId: string; symbol: string; name: string } | null>(null);
-  const [quickCategories, setQuickCategories] = useState<QuickFilterCategory[]>([]);
+  const [selectedPrimaries, setSelectedPrimaries] = useState<Set<PrimaryCategory>>(new Set());
+  const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('currentValue');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
@@ -233,27 +309,57 @@ export default function Assets() {
     return positions
       .filter(
         (p) =>
-          matchesQuickFilters(p, quickCategories) && matchesColFilters(p, colFilter, assetTagMap)
+          matchesSelection(p, selectedPrimaries, selectedSubs) && matchesColFilters(p, colFilter, assetTagMap)
       )
       .sort((a, b) => compareFn(a, b, sortField, sortDir, usdToInr));
-  }, [positions, quickCategories, sortField, sortDir, colFilter, assetTagMap, usdToInr]);
+  }, [positions, selectedPrimaries, selectedSubs, sortField, sortDir, colFilter, assetTagMap, usdToInr]);
 
   const activeFilterCount = useMemo(() => {
-    let count = quickCategories.length;
+    let count = selectedPrimaries.size + selectedSubs.size;
     if (colFilter.symbol) count++;
     if (colFilter.name) count++;
     if (colFilter.assetClass) count++;
     if (colFilter.tagIds.length > 0) count++;
     return count;
-  }, [colFilter, quickCategories]);
+  }, [colFilter, selectedPrimaries, selectedSubs]);
 
-  const toggleQuickCategory = (value: QuickFilterCategory) => {
-    setQuickCategories((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
-    );
+  const togglePrimary = (value: PrimaryCategory) => {
+    setSelectedPrimaries((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+        setSelectedSubs((prevSubs) => {
+          const nextSubs = new Set(prevSubs);
+          const allSubValues = SUB_FILTERS[value]
+            .flatMap((sf) => [sf.value, ...(sf.children?.map((c) => c.value) ?? [])]);
+          allSubValues.forEach((sv) => nextSubs.delete(sv));
+          return nextSubs;
+        });
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
   };
 
-  const clearColFilters = () => setColFilter({ ...EMPTY_COL_FILTER });
+  const toggleSub = (sub: string) => {
+    setSelectedSubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(sub)) {
+        next.delete(sub);
+      } else {
+        next.add(sub);
+      }
+      return next;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setSelectedPrimaries(new Set());
+    setSelectedSubs(new Set());
+    setColFilter({ ...EMPTY_COL_FILTER });
+  };
+
   const toggleTagFilter = (tagId: string) =>
     setColFilter((f) => ({
       ...f,
@@ -356,36 +462,89 @@ export default function Assets() {
         </div>
       )}
 
-      {/* Category quick filters (multi-select, OR) */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setQuickCategories([])}
-          className={clsx(
-            'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-            quickCategories.length === 0
-              ? 'bg-brand-600/20 text-brand-400'
-              : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
-          )}
-        >
-          All
-        </button>
-        {FILTER_OPTIONS.map((opt) => {
-          const on = quickCategories.includes(opt.value);
-          return (
+      {/* Primary category chips (multi-select) */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => { setSelectedPrimaries(new Set()); setSelectedSubs(new Set()); }}
+            className={clsx(
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              selectedPrimaries.size === 0
+                ? 'bg-brand-600/20 text-brand-400'
+                : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
+            )}
+          >
+            All
+          </button>
+          {PRIMARY_CATEGORIES.filter((c) => c.value !== 'all').map((cat) => (
             <button
               type="button"
-              key={opt.value}
-              onClick={() => toggleQuickCategory(opt.value)}
+              key={cat.value}
+              onClick={() => togglePrimary(cat.value)}
               className={clsx(
                 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                on
+                selectedPrimaries.has(cat.value)
                   ? 'bg-brand-600/20 text-brand-400 ring-1 ring-brand-500/40'
                   : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
               )}
             >
-              {opt.label}
+              {cat.label}
             </button>
+          ))}
+        </div>
+
+        {/* Sub-category chips for each selected primary (multi-select) */}
+        {[...selectedPrimaries].map((primary) => {
+          const subs = SUB_FILTERS[primary].filter((sf) => sf.value !== 'all');
+          if (subs.length === 0) return null;
+          const label = PRIMARY_CATEGORIES.find((c) => c.value === primary)?.label ?? primary;
+          return (
+            <div key={primary} className="space-y-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap pl-2 border-l-2 border-surface-700">
+                <span className="text-[10px] uppercase tracking-wider text-surface-600 mr-1">{label}</span>
+                {subs.map((sf) => {
+                  const isParentActive = selectedSubs.has(sf.value);
+                  const hasActiveChild = sf.children?.some((c) => selectedSubs.has(c.value));
+                  return (
+                    <button
+                      type="button"
+                      key={sf.value}
+                      onClick={() => toggleSub(sf.value)}
+                      className={clsx(
+                        'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                        isParentActive || hasActiveChild
+                          ? 'bg-brand-600/30 text-brand-300 ring-1 ring-brand-500/30'
+                          : 'text-surface-500 hover:text-surface-200 hover:bg-surface-800/50'
+                      )}
+                    >
+                      {sf.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Level 3 children for active sub-filters with children */}
+              {subs.filter((sf) => sf.children && (selectedSubs.has(sf.value) || sf.children.some((c) => selectedSubs.has(c.value)))).map((sf) => (
+                <div key={`${sf.value}-children`} className="flex items-center gap-1.5 flex-wrap pl-4 border-l-2 border-surface-700/50">
+                  {sf.children!.map((child) => (
+                    <button
+                      type="button"
+                      key={child.value}
+                      onClick={() => toggleSub(child.value)}
+                      className={clsx(
+                        'px-2 py-0.5 rounded text-xs font-medium transition-colors',
+                        selectedSubs.has(child.value)
+                          ? 'bg-surface-700 text-surface-100 ring-1 ring-surface-500/40'
+                          : 'text-surface-500 hover:text-surface-200'
+                      )}
+                    >
+                      {child.label}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
           );
         })}
       </div>
@@ -458,10 +617,10 @@ export default function Assets() {
             </div>
             {activeFilterCount > 0 && (
               <div className="flex justify-end gap-3">
-                {quickCategories.length > 0 && (
+                {(selectedPrimaries.size > 0 || selectedSubs.size > 0) && (
                   <button
                     type="button"
-                    onClick={() => setQuickCategories([])}
+                    onClick={() => { setSelectedPrimaries(new Set()); setSelectedSubs(new Set()); }}
                     className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
                   >
                     Clear category filters
@@ -469,10 +628,7 @@ export default function Assets() {
                 )}
                 <button
                   type="button"
-                  onClick={() => {
-                    clearColFilters();
-                    setQuickCategories([]);
-                  }}
+                  onClick={clearAllFilters}
                   className="text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
                   Clear all filters

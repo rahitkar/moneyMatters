@@ -21,6 +21,104 @@ export interface AssetAllocation {
   count: number;
 }
 
+export interface DimensionSlice {
+  label: string;
+  value: number;
+  percentage: number;
+  count: number;
+}
+
+export interface MultiDimensionalAllocation {
+  byAssetClass: DimensionSlice[];
+  byGeography: DimensionSlice[];
+  byInstrumentType: DimensionSlice[];
+  byRiskProfile: DimensionSlice[];
+  byCurrency: DimensionSlice[];
+  bySubCategory: DimensionSlice[];
+}
+
+const isIndianSymbol = (symbol: string) =>
+  symbol.endsWith('.NS') || symbol.endsWith('.BO');
+
+const GOV_SCHEME_CLASSES = new Set(['ppf', 'epf', 'nps']);
+const METAL_CLASSES = new Set(['gold', 'silver', 'metals']);
+const CASH_EQUIV_CLASSES = new Set(['cash', 'fixed_deposit', 'lended']);
+
+const MF_CLASSES = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
+
+function getGeography(assetClass: string, symbol: string): string {
+  if (METAL_CLASSES.has(assetClass)) return 'Metals';
+  if (CASH_EQUIV_CLASSES.has(assetClass)) return 'Cash & Equivalents';
+  if (assetClass === 'crypto') return 'Crypto';
+  if (GOV_SCHEME_CLASSES.has(assetClass)) return 'India';
+  if (MF_CLASSES.has(assetClass)) return 'India';
+  return isIndianSymbol(symbol) ? 'India' : 'International';
+}
+
+function getInstrumentType(assetClass: string): string {
+  switch (assetClass) {
+    case 'stocks': return 'Equities';
+    case 'etf': return 'ETFs';
+    case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
+    case 'gold': case 'silver': case 'metals': return 'Commodities';
+    case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
+    case 'fixed_deposit': case 'bonds': return 'Fixed Income';
+    case 'crypto': return 'Crypto';
+    case 'lended': return 'Lended';
+    case 'cash': return 'Cash';
+    case 'real_estate': return 'Real Estate';
+    default: return 'Other';
+  }
+}
+
+function getRiskProfile(assetClass: string): string {
+  switch (assetClass) {
+    case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity': return 'Equity';
+    case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': case 'ppf': case 'epf': return 'Debt';
+    case 'gold': case 'silver': case 'metals': return 'Commodity';
+    case 'crypto': case 'real_estate': case 'nps': return 'Alternative';
+    case 'cash': case 'lended': return 'Cash';
+    default: return 'Other';
+  }
+}
+
+function getSubCategory(assetClass: string, symbol: string): string {
+  const indian = isIndianSymbol(symbol);
+  switch (assetClass) {
+    case 'stocks': return indian ? 'Indian Stocks' : 'US Stocks';
+    case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
+    case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
+    case 'mutual_fund_debt': return 'MF Debt';
+    case 'gold': return 'Gold';
+    case 'silver': return 'Silver';
+    case 'metals': return 'Other Metals';
+    case 'ppf': return 'PPF';
+    case 'epf': return 'EPF';
+    case 'nps': return 'NPS';
+    case 'fixed_deposit': return 'Fixed Deposit';
+    case 'lended': return 'Lended';
+    case 'crypto': return 'Crypto';
+    case 'cash': return 'Cash';
+    case 'bonds': return 'Bonds';
+    case 'real_estate': return 'Real Estate';
+    default: return assetClass;
+  }
+}
+
+function buildDimensionSlices(buckets: Map<string, { value: number; count: number }>, totalValue: number): DimensionSlice[] {
+  const slices: DimensionSlice[] = [];
+  for (const [label, data] of buckets) {
+    slices.push({
+      label,
+      value: data.value,
+      percentage: totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+      count: data.count,
+    });
+  }
+  slices.sort((a, b) => b.value - a.value);
+  return slices;
+}
+
 export interface HoldingWithValue {
   id: string;
   assetId: string;
@@ -246,5 +344,46 @@ export const portfolioService = {
       .filter((h) => h.costBasis > 0)
       .sort((a, b) => a.gainPercent - b.gainPercent)
       .slice(0, limit);
+  },
+
+  async getMultiDimensionalAllocation(): Promise<MultiDimensionalAllocation> {
+    const positions = await transactionService.getAllPositions();
+
+    const byAssetClass = new Map<string, { value: number; count: number }>();
+    const byGeography = new Map<string, { value: number; count: number }>();
+    const byInstrumentType = new Map<string, { value: number; count: number }>();
+    const byRiskProfile = new Map<string, { value: number; count: number }>();
+    const byCurrency = new Map<string, { value: number; count: number }>();
+    const bySubCategory = new Map<string, { value: number; count: number }>();
+
+    let totalValue = 0;
+
+    for (const p of positions) {
+      totalValue += p.currentValue;
+      const v = p.currentValue;
+
+      const addTo = (map: Map<string, { value: number; count: number }>, key: string) => {
+        const e = map.get(key) || { value: 0, count: 0 };
+        e.value += v;
+        e.count += 1;
+        map.set(key, e);
+      };
+
+      addTo(byAssetClass, getSubCategory(p.assetClass, p.symbol));
+      addTo(byGeography, getGeography(p.assetClass, p.symbol));
+      addTo(byInstrumentType, getInstrumentType(p.assetClass));
+      addTo(byRiskProfile, getRiskProfile(p.assetClass));
+      addTo(byCurrency, p.currency || 'INR');
+      addTo(bySubCategory, getSubCategory(p.assetClass, p.symbol));
+    }
+
+    return {
+      byAssetClass: buildDimensionSlices(byAssetClass, totalValue),
+      byGeography: buildDimensionSlices(byGeography, totalValue),
+      byInstrumentType: buildDimensionSlices(byInstrumentType, totalValue),
+      byRiskProfile: buildDimensionSlices(byRiskProfile, totalValue),
+      byCurrency: buildDimensionSlices(byCurrency, totalValue),
+      bySubCategory: buildDimensionSlices(bySubCategory, totalValue),
+    };
   },
 };

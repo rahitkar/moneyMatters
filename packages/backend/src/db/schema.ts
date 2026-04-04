@@ -13,6 +13,11 @@ export const ASSET_CLASSES = [
   'gold',
   'silver',
   'metals',
+  'ppf',
+  'epf',
+  'nps',
+  'fixed_deposit',
+  'lended',
   'cash',
 ] as const;
 

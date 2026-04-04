@@ -10,6 +10,7 @@ import type {
   TagWithCount,
   PortfolioSummary,
   AssetAllocation,
+  MultiDimensionalAllocation,
   SearchResult,
   AssetClass,
   Provider,
@@ -37,6 +38,7 @@ export const queryKeys = {
   tagsWithCounts: ['tags', 'with-counts'] as const,
   portfolioSummary: ['portfolio', 'summary'] as const,
   portfolioAllocation: ['portfolio', 'allocation'] as const,
+  portfolioAllocationMulti: ['portfolio', 'allocation', 'multi'] as const,
   portfolioHoldings: ['portfolio', 'holdings'] as const,
   topPerformers: ['portfolio', 'top-performers'] as const,
   worstPerformers: ['portfolio', 'worst-performers'] as const,
@@ -270,6 +272,14 @@ export function usePortfolioAllocation() {
   return useQuery({
     queryKey: queryKeys.portfolioAllocation,
     queryFn: () => api.get<{ allocation: AssetAllocation[] }>('/portfolio/allocation').then((r) => r.allocation),
+    refetchInterval: 1000 * 60 * 5,
+  });
+}
+
+export function useMultiDimensionalAllocation() {
+  return useQuery({
+    queryKey: queryKeys.portfolioAllocationMulti,
+    queryFn: () => api.get<{ allocation: MultiDimensionalAllocation }>('/portfolio/allocation/multi').then((r) => r.allocation),
     refetchInterval: 1000 * 60 * 5,
   });
 }

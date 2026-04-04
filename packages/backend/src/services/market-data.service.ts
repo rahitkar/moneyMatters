@@ -39,6 +39,11 @@ function getProviderForAssetClass(assetClass: AssetClass): Provider {
     case 'silver':
     case 'metals':
       return 'metals_api';
+    case 'ppf':
+    case 'epf':
+    case 'nps':
+    case 'fixed_deposit':
+    case 'lended':
     case 'cash':
       return 'manual';
     default:

@@ -19,6 +19,39 @@ import { formatNumber, formatPercent } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { HoldingWithValue, Asset, AssetClass } from '../api/types';
 
+const isIndianSymbol = (symbol: string) =>
+  symbol.endsWith('.NS') || symbol.endsWith('.BO');
+
+type PrimaryCategory = 'all' | 'india' | 'international' | 'metals' | 'crypto' | 'cash_equiv';
+
+const GOV_SCHEME_CLASSES: AssetClass[] = ['ppf', 'epf', 'nps'];
+const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'lended'];
+const MF_CLASSES: AssetClass[] = ['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt'];
+
+const PRIMARY_CATEGORIES: { value: PrimaryCategory; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'india', label: 'India' },
+  { value: 'international', label: 'International' },
+  { value: 'metals', label: 'Metals' },
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'cash_equiv', label: 'Cash & Equiv.' },
+];
+
+function getHoldingPrimaryCategory(assetClass: string, symbol: string): PrimaryCategory {
+  if (METAL_CLASSES.includes(assetClass as AssetClass)) return 'metals';
+  if (CASH_EQUIV_CLASSES.includes(assetClass as AssetClass)) return 'cash_equiv';
+  if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass)) return 'india';
+  if (MF_CLASSES.includes(assetClass as AssetClass)) return 'india';
+  if (assetClass === 'crypto') return 'crypto';
+  return isIndianSymbol(symbol) ? 'india' : 'international';
+}
+
+function matchesSelectedPrimaries(h: HoldingWithValue, selected: Set<PrimaryCategory>): boolean {
+  if (selected.size === 0) return true;
+  return selected.has(getHoldingPrimaryCategory(h.assetClass, h.symbol));
+}
+
 export default function Holdings() {
   const { data: holdings, isLoading } = usePortfolioHoldings();
   const { data: assets } = useAssets();
@@ -27,18 +60,23 @@ export default function Holdings() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingHolding, setEditingHolding] = useState<HoldingWithValue | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterClass, setFilterClass] = useState<AssetClass | 'all' | 'metals_group'>('all');
+  const [selectedPrimaries, setSelectedPrimaries] = useState<Set<PrimaryCategory>>(new Set());
 
-  const METAL_ASSET_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
+  const togglePrimary = (value: PrimaryCategory) => {
+    setSelectedPrimaries((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
 
   const filteredHoldings = holdings?.filter((h) => {
     const matchesSearch =
       searchQuery === '' ||
       h.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
       h.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesClass = filterClass === 'all'
-      || (filterClass === 'metals_group' ? METAL_ASSET_CLASSES.includes(h.assetClass) : h.assetClass === filterClass);
-    return matchesSearch && matchesClass;
+    return matchesSearch && matchesSelectedPrimaries(h, selectedPrimaries);
   });
 
   if (isLoading) {
@@ -74,28 +112,28 @@ export default function Holdings() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => setFilterClass('all')}
+              onClick={() => setSelectedPrimaries(new Set())}
               className={clsx(
                 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                filterClass === 'all'
+                selectedPrimaries.size === 0
                   ? 'bg-brand-600/20 text-brand-400'
                   : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
               )}
             >
               All
             </button>
-            {(['stocks', 'crypto', 'etf', 'metals_group'] as const).map((ac) => (
+            {PRIMARY_CATEGORIES.filter((c) => c.value !== 'all').map((cat) => (
               <button
-                key={ac}
-                onClick={() => setFilterClass(ac)}
+                key={cat.value}
+                onClick={() => togglePrimary(cat.value)}
                 className={clsx(
                   'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                  filterClass === ac
-                    ? 'bg-brand-600/20 text-brand-400'
+                  selectedPrimaries.has(cat.value)
+                    ? 'bg-brand-600/20 text-brand-400 ring-1 ring-brand-500/40'
                     : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
                 )}
               >
-                {ac === 'metals_group' ? 'Metals' : ac.charAt(0).toUpperCase() + ac.slice(1)}
+                {cat.label}
               </button>
             ))}
           </div>

@@ -25,10 +25,10 @@ import { clsx } from 'clsx';
 import Card from '../components/Card';
 import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
-import AssetClassBadge, { getAssetClassColor } from '../components/AssetClassBadge';
+// AssetClassBadge not needed — multi-dim allocation uses label strings
 import {
   usePortfolioSummary,
-  usePortfolioAllocation,
+  useMultiDimensionalAllocation,
   usePortfolioHoldings,
   useTopPerformers,
   useWorstPerformers,
@@ -38,7 +38,29 @@ import {
 } from '../api/hooks';
 import { formatCurrency, formatPercent, formatNumber, formatDate } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
-import type { TimeInterval } from '../api/types';
+import type { TimeInterval, DimensionSlice } from '../api/types';
+
+type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency';
+
+const DIMENSION_TABS: { value: AllocDimension; label: string }[] = [
+  { value: 'bySubCategory', label: 'Sub-Category' },
+  { value: 'byAssetClass', label: 'Asset Class' },
+  { value: 'byGeography', label: 'Geography' },
+  { value: 'byInstrumentType', label: 'Instrument' },
+  { value: 'byRiskProfile', label: 'Risk Profile' },
+  { value: 'byCurrency', label: 'Currency' },
+];
+
+const SLICE_COLORS = [
+  '#3b82f6', '#a855f7', '#22c55e', '#eab308', '#ef4444',
+  '#06b6d4', '#f97316', '#6366f1', '#14b8a6', '#ec4899',
+  '#84cc16', '#f59e0b', '#8b5cf6', '#10b981', '#e11d48',
+  '#0ea5e9', '#d946ef', '#64748b',
+];
+
+function getSliceColor(index: number): string {
+  return SLICE_COLORS[index % SLICE_COLORS.length];
+}
 
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
   { value: '1W', label: '1W' },
@@ -50,8 +72,9 @@ const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
 
 export default function Dashboard() {
   const [perfInterval, setPerfInterval] = useState<TimeInterval>('1M');
+  const [allocDimension, setAllocDimension] = useState<AllocDimension>('bySubCategory');
   const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
-  const { data: allocation, isLoading: allocationLoading } = usePortfolioAllocation();
+  const { data: multiAlloc, isLoading: allocationLoading } = useMultiDimensionalAllocation();
   const { data: holdings } = usePortfolioHoldings();
   const { data: topPerformers } = useTopPerformers(5);
   const { data: worstPerformers } = useWorstPerformers(5);
@@ -182,69 +205,89 @@ export default function Dashboard() {
 
       {/* Allocation Chart & Holdings */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Allocation Chart */}
+        {/* Multi-Dimensional Allocation Chart */}
         <Card className="lg:col-span-1 animate-slide-up animate-delay-400">
-          <h2 className="text-lg font-semibold text-surface-100 mb-6">
-            Asset Allocation
+          <h2 className="text-lg font-semibold text-surface-100 mb-4">
+            Portfolio Allocation
           </h2>
-          {allocation && allocation.length > 0 ? (
-            <>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RechartsPie>
-                    <Pie
-                      data={allocation}
-                      dataKey="value"
-                      nameKey="assetClass"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={90}
-                      paddingAngle={2}
-                    >
-                      {allocation.map((entry) => (
-                        <Cell
-                          key={entry.assetClass}
-                          fill={getAssetClassColor(entry.assetClass)}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#27272a',
-                        border: '1px solid #3f3f46',
-                        borderRadius: '12px',
-                      }}
-                      formatter={(value: number) => formatCurrency(value)}
-                    />
-                  </RechartsPie>
-                </ResponsiveContainer>
-              </div>
-              <div className="space-y-3 mt-4">
-                {allocation.map((item) => (
-                  <div
-                    key={item.assetClass}
-                    className="flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{
-                          backgroundColor: getAssetClassColor(item.assetClass),
+
+          {/* Dimension tabs */}
+          <div className="flex flex-wrap gap-1 mb-4">
+            {DIMENSION_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setAllocDimension(tab.value)}
+                className={clsx(
+                  'px-2 py-0.5 rounded text-[11px] font-medium transition-colors',
+                  allocDimension === tab.value
+                    ? 'bg-brand-600/30 text-brand-300'
+                    : 'text-surface-500 hover:text-surface-200 hover:bg-surface-800/50'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {(() => {
+            const slices: DimensionSlice[] = multiAlloc?.[allocDimension] ?? [];
+            if (slices.length === 0) {
+              return <p className="text-surface-500 text-center py-8">No allocation data</p>;
+            }
+            return (
+              <>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RechartsPie>
+                      <Pie
+                        data={slices}
+                        dataKey="value"
+                        nameKey="label"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={85}
+                        paddingAngle={2}
+                      >
+                        {slices.map((_, idx) => (
+                          <Cell key={idx} fill={getSliceColor(idx)} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#27272a',
+                          border: '1px solid #3f3f46',
+                          borderRadius: '12px',
                         }}
+                        formatter={(value: number) => formatCurrency(value)}
                       />
-                      <AssetClassBadge assetClass={item.assetClass} size="sm" />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                </div>
+                <div className="space-y-2 mt-3 max-h-64 overflow-y-auto">
+                  {slices.map((item, idx) => (
+                    <div
+                      key={item.label}
+                      className="flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: getSliceColor(idx) }}
+                        />
+                        <span className="text-xs text-surface-300 truncate">
+                          {item.label}
+                        </span>
+                      </div>
+                      <span className="text-xs text-surface-400 tabular-nums flex-shrink-0 ml-2">
+                        {formatPercent(item.percentage)}
+                      </span>
                     </div>
-                    <span className="text-sm text-surface-300 tabular-nums">
-                      {formatPercent(item.percentage)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="text-surface-500 text-center py-8">No allocation data</p>
-          )}
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </Card>
 
         {/* Holdings Table */}

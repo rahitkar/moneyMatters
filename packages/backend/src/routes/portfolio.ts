@@ -16,6 +16,12 @@ export async function portfolioRoutes(fastify: FastifyInstance) {
     return { allocation };
   });
 
+  // Multi-dimensional allocation (6 dimensions)
+  fastify.get('/allocation/multi', async () => {
+    const allocation = await portfolioService.getMultiDimensionalAllocation();
+    return { allocation };
+  });
+
   // Get all holdings with calculated values
   fastify.get('/holdings', async () => {
     const holdings = await portfolioService.getHoldingsWithValues();
