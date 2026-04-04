@@ -116,6 +116,7 @@ export interface MultiDimensionalAllocation {
   byRiskProfile: DimensionSlice[];
   byCurrency: DimensionSlice[];
   bySubCategory: DimensionSlice[];
+  byLiquidity: DimensionSlice[];
 }
 
 export interface MarketQuote {

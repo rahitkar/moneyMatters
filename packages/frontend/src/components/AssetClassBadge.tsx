@@ -16,7 +16,7 @@ const ASSET_CLASS_CONFIG: Record<
   vehicle: { label: 'Vehicle', color: 'text-rose-400', bg: 'bg-rose-500/20' },
   gold: { label: 'Gold', color: 'text-yellow-400', bg: 'bg-yellow-500/20' },
   silver: { label: 'Silver', color: 'text-slate-300', bg: 'bg-slate-400/20' },
-  metals: { label: 'Metals', color: 'text-amber-400', bg: 'bg-amber-500/20' },
+  metals: { label: 'Commodities', color: 'text-amber-400', bg: 'bg-amber-500/20' },
   ppf: { label: 'PPF', color: 'text-teal-300', bg: 'bg-teal-400/20' },
   epf: { label: 'EPF', color: 'text-teal-400', bg: 'bg-teal-500/20' },
   nps: { label: 'NPS', color: 'text-cyan-400', bg: 'bg-cyan-500/20' },

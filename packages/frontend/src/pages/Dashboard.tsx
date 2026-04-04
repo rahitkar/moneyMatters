@@ -40,7 +40,7 @@ import { formatCurrency, formatPercent, formatNumber, formatDate } from '../lib/
 import CurrencyValue from '../components/CurrencyValue';
 import type { TimeInterval, DimensionSlice } from '../api/types';
 
-type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency';
+type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity';
 
 const DIMENSION_TABS: { value: AllocDimension; label: string }[] = [
   { value: 'bySubCategory', label: 'Sub-Category' },
@@ -48,6 +48,7 @@ const DIMENSION_TABS: { value: AllocDimension; label: string }[] = [
   { value: 'byGeography', label: 'Geography' },
   { value: 'byInstrumentType', label: 'Instrument' },
   { value: 'byRiskProfile', label: 'Risk Profile' },
+  { value: 'byLiquidity', label: 'Liquidity' },
   { value: 'byCurrency', label: 'Currency' },
 ];
 

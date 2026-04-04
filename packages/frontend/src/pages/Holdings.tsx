@@ -33,7 +33,7 @@ const PRIMARY_CATEGORIES: { value: PrimaryCategory; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'india', label: 'India' },
   { value: 'international', label: 'International' },
-  { value: 'metals', label: 'Metals' },
+  { value: 'metals', label: 'Commodities' },
   { value: 'crypto', label: 'Crypto' },
   { value: 'cash_equiv', label: 'Cash & Equiv.' },
 ];

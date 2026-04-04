@@ -50,6 +50,7 @@ export interface MultiDimensionalAllocation {
   byRiskProfile: DimensionSlice[];
   byCurrency: DimensionSlice[];
   bySubCategory: DimensionSlice[];
+  byLiquidity: DimensionSlice[];
 }
 
 const isIndianSymbol = (symbol: string) =>
@@ -89,12 +90,55 @@ function getInstrumentType(assetClass: string): string {
 
 function getRiskProfile(assetClass: string): string {
   switch (assetClass) {
-    case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity': return 'Equity';
-    case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': case 'ppf': case 'epf': return 'Debt';
-    case 'gold': case 'silver': case 'metals': return 'Commodity';
-    case 'crypto': case 'real_estate': case 'vehicle': case 'nps': return 'Alternative';
-    case 'cash': case 'lended': return 'Cash';
+    case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+    case 'gold': case 'silver': case 'metals': case 'crypto':
+      return 'Growth Investment';
+    case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit':
+      return 'Protective Investment';
+    case 'lended':
+      return 'Lended';
+    case 'epf': case 'ppf': case 'nps':
+      return 'Retirement';
+    case 'real_estate': case 'vehicle':
+      return 'Physical Asset';
+    case 'cash':
+      return 'Cash';
     default: return 'Other';
+  }
+}
+
+function getLiquidity(assetClass: string): string {
+  switch (assetClass) {
+    case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+    case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+      return 'Liquid';
+    case 'gold': case 'silver': case 'metals':
+    case 'ppf': case 'epf': case 'nps': case 'fixed_deposit':
+    case 'lended': case 'real_estate': case 'vehicle':
+      return 'Non-Liquid';
+    default: return 'Other';
+  }
+}
+
+function getAssetClassLabel(assetClass: string): string {
+  switch (assetClass) {
+    case 'stocks': return 'Stocks';
+    case 'etf': return 'ETF';
+    case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
+    case 'gold': return 'Gold';
+    case 'silver': return 'Silver';
+    case 'metals': return 'Commodities';
+    case 'ppf': return 'PPF';
+    case 'epf': return 'EPF';
+    case 'nps': return 'NPS';
+    case 'fixed_deposit': return 'Fixed Deposit';
+    case 'lended': return 'Lended';
+    case 'crypto': return 'Crypto';
+    case 'cash': return 'Cash';
+    case 'bonds': return 'Bonds';
+    case 'real_estate': return 'Property';
+    case 'vehicle': return 'Vehicle';
+    default: return assetClass;
   }
 }
 
@@ -107,7 +151,7 @@ function getSubCategory(assetClass: string, symbol: string): string {
     case 'mutual_fund_debt': return 'MF Debt';
     case 'gold': return 'Gold';
     case 'silver': return 'Silver';
-    case 'metals': return 'Other Metals';
+    case 'metals': return 'Commodities';
     case 'ppf': return 'PPF';
     case 'epf': return 'EPF';
     case 'nps': return 'NPS';
@@ -391,6 +435,7 @@ export const portfolioService = {
     const byRiskProfile = new Map<string, { value: number; count: number }>();
     const byCurrency = new Map<string, { value: number; count: number }>();
     const bySubCategory = new Map<string, { value: number; count: number }>();
+    const byLiquidity = new Map<string, { value: number; count: number }>();
 
     let totalValue = 0;
 
@@ -408,12 +453,13 @@ export const portfolioService = {
         map.set(key, e);
       };
 
-      addTo(byAssetClass, getSubCategory(p.assetClass, p.symbol));
+      addTo(byAssetClass, getAssetClassLabel(p.assetClass));
       addTo(byGeography, getGeography(p.assetClass, p.symbol));
       addTo(byInstrumentType, getInstrumentType(p.assetClass));
       addTo(byRiskProfile, getRiskProfile(p.assetClass));
       addTo(byCurrency, p.currency || 'INR');
       addTo(bySubCategory, getSubCategory(p.assetClass, p.symbol));
+      addTo(byLiquidity, getLiquidity(p.assetClass));
     }
 
     return {
@@ -423,6 +469,7 @@ export const portfolioService = {
       byRiskProfile: buildDimensionSlices(byRiskProfile, totalValue),
       byCurrency: buildDimensionSlices(byCurrency, totalValue),
       bySubCategory: buildDimensionSlices(bySubCategory, totalValue),
+      byLiquidity: buildDimensionSlices(byLiquidity, totalValue),
     };
   },
 };
