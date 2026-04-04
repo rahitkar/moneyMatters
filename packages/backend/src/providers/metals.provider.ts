@@ -1,5 +1,4 @@
-// Free metals price API - uses metals.live (no API key required)
-const METALS_API = 'https://api.metals.live/v1';
+import { yahooFinanceProvider } from './yahoo-finance.provider.js';
 
 export interface MetalQuote {
   symbol: string;
@@ -9,7 +8,6 @@ export interface MetalQuote {
   unit: string;
 }
 
-// Metal symbols mapping
 const METAL_NAMES: Record<string, string> = {
   GOLD: 'Gold',
   SILVER: 'Silver',
@@ -32,19 +30,73 @@ const SYMBOL_MAP: Record<string, string> = {
   XPD: 'palladium',
 };
 
+// Yahoo Finance futures symbols for metals
+const YAHOO_METAL_SYMBOLS: Record<string, string> = {
+  GOLD: 'GC=F',
+  SILVER: 'SI=F',
+  PLATINUM: 'PL=F',
+  PALLADIUM: 'PA=F',
+};
+
+const METALS_API = 'https://api.metals.live/v1';
+
 export const metalsProvider = {
+  /**
+   * Primary: Yahoo Finance commodity futures (GC=F, SI=F, etc.)
+   * Fallback 1: metals.live API
+   * Fallback 2: hardcoded recent prices
+   */
   async getSpotPrices(): Promise<Map<string, MetalQuote>> {
+    // Try Yahoo Finance first (most reliable)
+    const results = await this.getYahooFinancePrices();
+    if (results.size > 0) return results;
+
+    // Fallback to metals.live
+    try {
+      const mlResults = await this.getMetalsLivePrices();
+      if (mlResults.size > 0) return mlResults;
+    } catch {
+      // Fall through to hardcoded fallback
+    }
+
+    return this.getFallbackPrices();
+  },
+
+  async getYahooFinancePrices(): Promise<Map<string, MetalQuote>> {
     const results = new Map<string, MetalQuote>();
 
-    try {
-      const response = await fetch(`${METALS_API}/spot`);
-      if (!response.ok) {
-        throw new Error(`Metals API error: ${response.status}`);
+    for (const [metal, yfSymbol] of Object.entries(YAHOO_METAL_SYMBOLS)) {
+      try {
+        const quote = await yahooFinanceProvider.getQuote(yfSymbol);
+        if (quote && quote.price > 0) {
+          results.set(metal, {
+            symbol: metal,
+            name: METAL_NAMES[metal],
+            price: quote.price,
+            currency: 'USD',
+            unit: 'oz',
+          });
+        }
+      } catch (error) {
+        console.error(`Yahoo Finance metal quote error for ${metal} (${yfSymbol}):`, error);
       }
+    }
+
+    return results;
+  },
+
+  async getMetalsLivePrices(): Promise<Map<string, MetalQuote>> {
+    const results = new Map<string, MetalQuote>();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch(`${METALS_API}/spot`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!response.ok) throw new Error(`Metals API error: ${response.status}`);
 
       const data = await response.json();
-
-      // metals.live returns array of objects with metal names and prices
       for (const item of data) {
         const symbol = item.metal?.toUpperCase();
         if (symbol && METAL_NAMES[symbol]) {
@@ -53,14 +105,13 @@ export const metalsProvider = {
             name: METAL_NAMES[symbol],
             price: item.price || 0,
             currency: 'USD',
-            unit: 'oz', // per troy ounce
+            unit: 'oz',
           });
         }
       }
     } catch (error) {
-      console.error('Metals API error:', error);
-      // Fallback: try alternative free API
-      return this.getFallbackPrices();
+      clearTimeout(timeout);
+      console.error('Metals.live API error:', error);
     }
 
     return results;
@@ -69,14 +120,12 @@ export const metalsProvider = {
   async getFallbackPrices(): Promise<Map<string, MetalQuote>> {
     const results = new Map<string, MetalQuote>();
 
-    // Fallback using a different free API or cached values
-    // This is a simple fallback that returns approximate values
-    // In production, you might want to use a different API
+    // Approximate prices as of early 2026 — only used when both APIs fail
     const fallbackPrices: Record<string, number> = {
-      GOLD: 2000,
-      SILVER: 25,
-      PLATINUM: 900,
-      PALLADIUM: 1000,
+      GOLD: 4700,
+      SILVER: 55,
+      PLATINUM: 1100,
+      PALLADIUM: 1100,
     };
 
     for (const [symbol, price] of Object.entries(fallbackPrices)) {
@@ -95,18 +144,15 @@ export const metalsProvider = {
   async getQuote(symbol: string): Promise<MetalQuote | null> {
     const normalizedSymbol = symbol.toUpperCase();
     const metalKey = SYMBOL_MAP[normalizedSymbol];
+    if (!metalKey) return null;
 
-    if (!metalKey) {
-      return null;
-    }
-
-    const prices = await this.getSpotPrices();
-    const standardSymbol = normalizedSymbol === 'XAU' ? 'GOLD' 
+    const standardSymbol = normalizedSymbol === 'XAU' ? 'GOLD'
       : normalizedSymbol === 'XAG' ? 'SILVER'
       : normalizedSymbol === 'XPT' ? 'PLATINUM'
       : normalizedSymbol === 'XPD' ? 'PALLADIUM'
       : normalizedSymbol;
 
+    const prices = await this.getSpotPrices();
     return prices.get(standardSymbol) || null;
   },
 

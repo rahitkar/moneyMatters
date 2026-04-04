@@ -7,6 +7,7 @@ export type AssetClass =
   | 'crypto'
   | 'bonds'
   | 'real_estate'
+  | 'vehicle'
   | 'gold'
   | 'silver'
   | 'metals'
@@ -31,6 +32,9 @@ export interface Asset {
   currency: string | null;
   lastUpdated: string | null;
   createdAt: string;
+  interestRate?: number | null;
+  maturityDate?: string | null;
+  institution?: string | null;
 }
 
 export interface AssetWithTags extends Asset {

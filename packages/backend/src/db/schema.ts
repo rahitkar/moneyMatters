@@ -10,6 +10,7 @@ export const ASSET_CLASSES = [
   'crypto',
   'bonds',
   'real_estate',
+  'vehicle',
   'gold',
   'silver',
   'metals',
@@ -54,6 +55,9 @@ export const assets = sqliteTable('assets', {
   currency: text('currency').default('USD'),
   lastUpdated: integer('last_updated', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  interestRate: real('interest_rate'),
+  maturityDate: text('maturity_date'),
+  institution: text('institution'),
 });
 
 // Holdings table - stores user's positions in assets

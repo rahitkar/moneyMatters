@@ -43,6 +43,9 @@ function getProviderForAssetClass(assetClass: AssetClass): Provider {
     case 'epf':
     case 'nps':
     case 'fixed_deposit':
+    case 'bonds':
+    case 'real_estate':
+    case 'vehicle':
     case 'lended':
     case 'cash':
       return 'manual';
@@ -189,7 +192,7 @@ export const marketDataService = {
     // Update Yahoo Finance assets
     const yahooAssets = byProvider.get('yahoo_finance') || [];
     if (yahooAssets.length > 0) {
-      const symbols = yahooAssets.map((a) => a.symbol);
+      const symbols = [...new Set(yahooAssets.map((a) => a.symbol))];
       const quotes = await yahooFinanceProvider.getQuotes(symbols);
       for (const asset of yahooAssets) {
         const quote = quotes.get(asset.symbol);
@@ -230,10 +233,37 @@ export const marketDataService = {
     const metalAssets = byProvider.get('metals_api') || [];
     if (metalAssets.length > 0) {
       const metalPrices = await metalsProvider.getSpotPrices();
+
+      // Physical metals stored in INR need USD→INR + oz→gram + India import premium.
+      // Source is COMEX futures via Yahoo Finance. Each metal has a different effective
+      // India premium because of varying futures-vs-spot spreads and local premiums.
+      // Calibrated against Indian retail rates (April 2026):
+      //   Gold:   $4,703 GC=F → ₹15,132/g (target ~₹15,093)  factor 1.08
+      //   Silver: $73.17 SI=F → ₹250/g    (target ~₹250)      factor 1.147
+      const TROY_OZ_TO_GRAMS = 31.1035;
+      const INDIA_FACTORS: Record<string, number> = {
+        GOLD: 1.08,
+        SILVER: 1.147,
+      };
+      const DEFAULT_INDIA_FACTOR = 1.08;
+
+      let usdToInr: number | null = null;
+      const needsInr = metalAssets.some((a) => a.currency === 'INR');
+      if (needsInr) {
+        const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+        usdToInr = rateResult?.rate ?? null;
+      }
+
       for (const asset of metalAssets) {
-        const quote = metalPrices.get(asset.symbol);
+        const symbolKey = asset.symbol.split('-')[0];
+        const quote = metalPrices.get(asset.symbol) ?? metalPrices.get(symbolKey);
         if (quote) {
-          await assetService.updatePrice(asset.id, quote.price);
+          let price = quote.price;
+          if (asset.currency === 'INR' && usdToInr) {
+            const factor = INDIA_FACTORS[symbolKey] ?? DEFAULT_INDIA_FACTOR;
+            price = (price / TROY_OZ_TO_GRAMS) * usdToInr * factor;
+          }
+          await assetService.updatePrice(asset.id, price);
           updated++;
         } else {
           failed++;

@@ -12,6 +12,9 @@ export interface CreateAssetInput {
   currency?: string;
   /** Mutual fund ISIN (INF…) when known */
   isin?: string | null;
+  interestRate?: number | null;
+  maturityDate?: string | null;
+  institution?: string | null;
 }
 
 export interface UpdateAssetInput {
@@ -20,6 +23,9 @@ export interface UpdateAssetInput {
   currentPrice?: number;
   currency?: string;
   isin?: string | null;
+  interestRate?: number | null;
+  maturityDate?: string | null;
+  institution?: string | null;
 }
 
 export const assetService = {
@@ -97,6 +103,9 @@ export const assetService = {
       currency: input.currency ?? 'USD',
       lastUpdated: input.currentPrice ? now : null,
       createdAt: now,
+      interestRate: input.interestRate ?? null,
+      maturityDate: input.maturityDate ?? null,
+      institution: input.institution ?? null,
     };
 
     await db.insert(schema.assets).values(newAsset);
@@ -118,6 +127,9 @@ export const assetService = {
     if (input.isin !== undefined) {
       updates.isin = input.isin?.trim().toUpperCase() ?? null;
     }
+    if (input.interestRate !== undefined) updates.interestRate = input.interestRate;
+    if (input.maturityDate !== undefined) updates.maturityDate = input.maturityDate;
+    if (input.institution !== undefined) updates.institution = input.institution;
 
     if (Object.keys(updates).length > 0) {
       await db

@@ -13,6 +13,9 @@ const createAssetSchema = z.object({
   currentPrice: z.number().optional(),
   currency: z.string().optional(),
   isin: z.string().optional().nullable(),
+  interestRate: z.number().optional().nullable(),
+  maturityDate: z.string().optional().nullable(),
+  institution: z.string().optional().nullable(),
 });
 
 const updateAssetSchema = z.object({
@@ -21,6 +24,9 @@ const updateAssetSchema = z.object({
   currentPrice: z.number().optional(),
   currency: z.string().optional(),
   isin: z.string().optional().nullable(),
+  interestRate: z.number().optional().nullable(),
+  maturityDate: z.string().optional().nullable(),
+  institution: z.string().optional().nullable(),
 });
 
 const updatePriceSchema = z.object({
@@ -69,11 +75,12 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      // Check if asset already exists
+      // Allow duplicate symbols when a distinct name is provided (e.g. same stock
+      // held in different accounts/lots). Only block true duplicates (same symbol + name).
       const existing = await assetService.getBySymbol(validation.data.symbol);
-      if (existing) {
+      if (existing && existing.name === validation.data.name) {
         return reply.status(409).send({ 
-          error: 'Asset with this symbol already exists',
+          error: 'Asset with this symbol and name already exists',
           asset: existing 
         });
       }
@@ -130,6 +137,44 @@ export async function assetRoutes(fastify: FastifyInstance) {
       const updatedAsset = await assetService.getById(request.params.id);
 
       return { asset: updatedAsset };
+    }
+  );
+
+  // Update balance for a manual asset (back-calculates current_price)
+  const updateBalanceSchema = z.object({
+    balance: z.number().min(0),
+  });
+
+  fastify.put<{ Params: { id: string }; Body: z.infer<typeof updateBalanceSchema> }>(
+    '/:id/balance',
+    async (request, reply) => {
+      const validation = updateBalanceSchema.safeParse(request.body);
+      if (!validation.success) {
+        return reply.status(400).send({ error: validation.error.errors });
+      }
+
+      const asset = await assetService.getById(request.params.id);
+      if (!asset) {
+        return reply.status(404).send({ error: 'Asset not found' });
+      }
+
+      const position = await transactionService.getPositionForAsset(request.params.id);
+      const quantity = position?.quantity ?? 0;
+
+      if (quantity <= 0) {
+        return reply.status(400).send({
+          error: 'No open position. Add a deposit transaction first.',
+        });
+      }
+
+      const newPrice = validation.data.balance / quantity;
+      await assetService.updatePrice(request.params.id, newPrice);
+      const updatedAsset = await assetService.getById(request.params.id);
+
+      return {
+        asset: updatedAsset,
+        position: { quantity, balance: validation.data.balance, pricePerUnit: newPrice },
+      };
     }
   );
 

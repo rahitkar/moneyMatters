@@ -90,6 +90,9 @@ export function useCreateAsset() {
       provider: Provider;
       currentPrice?: number;
       currency?: string;
+      interestRate?: number | null;
+      maturityDate?: string | null;
+      institution?: string | null;
     }) => api.post<{ asset: Asset }>('/assets', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.assets });
@@ -128,6 +131,24 @@ export function useDeleteAsset() {
     onError: (error) => {
       console.error('Failed to delete asset:', error);
       alert(`Failed to delete asset: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateBalance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetId, balance }: { assetId: string; balance: number }) =>
+      api.put<{ asset: Asset; position: { quantity: number; balance: number; pricePerUnit: number } }>(
+        `/assets/${assetId}/balance`,
+        { balance }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.positions });
+      queryClient.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
+      queryClient.invalidateQueries({ queryKey: queryKeys.portfolioAllocation });
+      queryClient.invalidateQueries({ queryKey: queryKeys.portfolioHoldings });
     },
   });
 }

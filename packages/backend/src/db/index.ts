@@ -139,6 +139,15 @@ export function initializeDatabase() {
   if (!assetCols.some((c) => c.name === 'isin')) {
     sqlite.exec(`ALTER TABLE assets ADD COLUMN isin TEXT`);
   }
+  if (!assetCols.some((c) => c.name === 'interest_rate')) {
+    sqlite.exec(`ALTER TABLE assets ADD COLUMN interest_rate REAL`);
+  }
+  if (!assetCols.some((c) => c.name === 'maturity_date')) {
+    sqlite.exec(`ALTER TABLE assets ADD COLUMN maturity_date TEXT`);
+  }
+  if (!assetCols.some((c) => c.name === 'institution')) {
+    sqlite.exec(`ALTER TABLE assets ADD COLUMN institution TEXT`);
+  }
 
   // Seed default benchmarks
   seedBenchmarks();

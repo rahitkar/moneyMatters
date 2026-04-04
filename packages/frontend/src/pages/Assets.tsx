@@ -13,6 +13,9 @@ import {
   ArrowUpRight,
   Filter,
   Scissors,
+  RefreshCw,
+  PiggyBank,
+  Scale,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
@@ -21,6 +24,11 @@ import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import AssetClassBadge from '../components/AssetClassBadge';
 import TagBadge from '../components/TagBadge';
+import ManualAssetForm from '../components/ManualAssetForm';
+import PhysicalMetalForm from '../components/PhysicalMetalForm';
+import MetalTransactionForm from '../components/MetalTransactionForm';
+import UpdateBalanceModal from '../components/UpdateBalanceModal';
+import DepositWithdrawForm from '../components/DepositWithdrawForm';
 import {
   useAsset,
   useAssets,
@@ -44,7 +52,7 @@ const isIndianSymbol = (symbol: string) =>
 
 // ── Hierarchical filter system ──────────────────────────────────
 
-type PrimaryCategory = 'all' | 'india' | 'international' | 'metals' | 'crypto' | 'cash_equiv';
+type PrimaryCategory = 'all' | 'india' | 'international' | 'metals' | 'crypto' | 'cash_equiv' | 'physical';
 
 interface SubFilterDef {
   value: string;
@@ -54,7 +62,8 @@ interface SubFilterDef {
 
 const GOV_SCHEME_CLASSES: AssetClass[] = ['ppf', 'epf', 'nps'];
 const METAL_CLASSES: AssetClass[] = ['gold', 'silver', 'metals'];
-const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'lended'];
+const CASH_EQUIV_CLASSES: AssetClass[] = ['cash', 'fixed_deposit', 'bonds', 'lended'];
+const PHYSICAL_ASSET_CLASSES: AssetClass[] = ['real_estate', 'vehicle'];
 
 const PRIMARY_CATEGORIES: { value: PrimaryCategory; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -63,6 +72,7 @@ const PRIMARY_CATEGORIES: { value: PrimaryCategory; label: string }[] = [
   { value: 'metals', label: 'Metals' },
   { value: 'crypto', label: 'Crypto' },
   { value: 'cash_equiv', label: 'Cash & Equivalents' },
+  { value: 'physical', label: 'Physical Assets' },
 ];
 
 const SUB_FILTERS: Record<PrimaryCategory, SubFilterDef[]> = {
@@ -99,14 +109,23 @@ const SUB_FILTERS: Record<PrimaryCategory, SubFilterDef[]> = {
     { value: 'all', label: 'All' },
     { value: 'cash', label: 'Cash (Savings)' },
     { value: 'fixed_deposit', label: 'Fixed Deposit' },
+    { value: 'bonds', label: 'Bonds' },
     { value: 'lended', label: 'Lended' },
+  ],
+  physical: [
+    { value: 'all', label: 'All' },
+    { value: 'real_estate', label: 'Property' },
+    { value: 'vehicle', label: 'Vehicle' },
   ],
 };
 
 const MF_CLASSES: AssetClass[] = ['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt'];
+const MANUAL_ASSET_CLASSES: Set<AssetClass> = new Set(['ppf', 'epf', 'nps', 'fixed_deposit', 'bonds', 'cash', 'lended', 'real_estate', 'vehicle']);
+const PHYSICAL_METAL_CLASSES: Set<AssetClass> = new Set(['gold', 'silver', 'metals']);
 
 function getAssetPrimaryCategory(assetClass: string, symbol: string): PrimaryCategory {
   if (METAL_CLASSES.includes(assetClass as AssetClass)) return 'metals';
+  if (PHYSICAL_ASSET_CLASSES.includes(assetClass as AssetClass)) return 'physical';
   if (CASH_EQUIV_CLASSES.includes(assetClass as AssetClass)) return 'cash_equiv';
   if (GOV_SCHEME_CLASSES.includes(assetClass as AssetClass)) return 'india';
   if (MF_CLASSES.includes(assetClass as AssetClass)) return 'india';
@@ -136,7 +155,10 @@ function matchesSubFilter(p: Position, sub: string): boolean {
     case 'other_metals': return p.assetClass === 'metals';
     case 'cash': return p.assetClass === 'cash';
     case 'fixed_deposit': return p.assetClass === 'fixed_deposit';
+    case 'bonds': return p.assetClass === 'bonds';
     case 'lended': return p.assetClass === 'lended';
+    case 'real_estate': return p.assetClass === 'real_estate';
+    case 'vehicle': return p.assetClass === 'vehicle';
     default: return false;
   }
 }
@@ -200,7 +222,8 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'mutual_fund_debt', label: 'Mutual Fund - Debt' },
   { value: 'crypto', label: 'Cryptocurrency' },
   { value: 'bonds', label: 'Bonds' },
-  { value: 'real_estate', label: 'Real Estate' },
+  { value: 'real_estate', label: 'Property' },
+  { value: 'vehicle', label: 'Vehicle' },
   { value: 'gold', label: 'Gold' },
   { value: 'silver', label: 'Silver' },
   { value: 'metals', label: 'Other Metals' },
@@ -264,6 +287,9 @@ export default function Assets() {
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<{ assetId: string; symbol: string; name: string } | null>(null);
+  const [balanceTarget, setBalanceTarget] = useState<Position | null>(null);
+  const [depositTarget, setDepositTarget] = useState<Position | null>(null);
+  const [metalTxTarget, setMetalTxTarget] = useState<Position | null>(null);
   const [selectedPrimaries, setSelectedPrimaries] = useState<Set<PrimaryCategory>>(new Set());
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('currentValue');
@@ -370,8 +396,12 @@ export default function Assets() {
 
   const totals = useMemo(() => {
     if (!filteredPositions.length) return null;
+    const METAL_SELL_FACTOR = 0.95;
     const invested = filteredPositions.reduce((s, p) => s + toInr(p.totalCost, p.currency, usdToInr), 0);
-    const current = filteredPositions.reduce((s, p) => s + toInr(p.currentValue, p.currency, usdToInr), 0);
+    const current = filteredPositions.reduce((s, p) => {
+      const val = toInr(p.currentValue, p.currency, usdToInr);
+      return s + (PHYSICAL_METAL_CLASSES.has(p.assetClass) ? val * METAL_SELL_FACTOR : val);
+    }, 0);
     const pnl = current - invested;
     const pnlPercent = invested > 0 ? (pnl / invested) * 100 : 0;
     const investedUsd = usdToInr ? invested / usdToInr : null;
@@ -682,6 +712,9 @@ export default function Assets() {
                           name: position.name,
                         })
                       }
+                      onUpdateBalance={() => setBalanceTarget(position)}
+                      onDeposit={() => setDepositTarget(position)}
+                      onMetalTransaction={() => setMetalTxTarget(position)}
                     />
                     {expandedAssetId === position.assetId && (
                       <TransactionRows
@@ -740,6 +773,11 @@ export default function Assets() {
               </tfoot>
             </table>
           </div>
+          {filteredPositions.some((p) => PHYSICAL_METAL_CLASSES.has(p.assetClass)) && (
+            <p className="text-[11px] text-surface-500 px-4 pb-3 pt-1">
+              * Physical metal prices reflect Indian rates (import duty + GST) with a 5% deduction for making charges, impurities & wear.
+            </p>
+          )}
         </Card>
       ) : (
         <Card>
@@ -772,6 +810,33 @@ export default function Assets() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
       />
+
+      {/* Update Balance Modal */}
+      {balanceTarget && (
+        <UpdateBalanceModal
+          isOpen={!!balanceTarget}
+          onClose={() => setBalanceTarget(null)}
+          position={balanceTarget}
+        />
+      )}
+
+      {/* Deposit / Withdraw Modal */}
+      {depositTarget && (
+        <DepositWithdrawForm
+          isOpen={!!depositTarget}
+          onClose={() => setDepositTarget(null)}
+          position={depositTarget}
+        />
+      )}
+
+      {/* Metal Buy/Sell Modal */}
+      {metalTxTarget && (
+        <MetalTransactionForm
+          isOpen={!!metalTxTarget}
+          onClose={() => setMetalTxTarget(null)}
+          position={metalTxTarget}
+        />
+      )}
 
       {/* Tag Modal */}
       {selectedAssetId && (
@@ -841,6 +906,9 @@ function PositionRow({
   onToggle,
   onTagClick,
   onSplitClick,
+  onUpdateBalance,
+  onDeposit,
+  onMetalTransaction,
 }: {
   position: Position;
   usdToInr: number | null;
@@ -848,11 +916,23 @@ function PositionRow({
   onToggle: () => void;
   onTagClick: () => void;
   onSplitClick: () => void;
+  onUpdateBalance: () => void;
+  onDeposit: () => void;
+  onMetalTransaction: () => void;
 }) {
   const deleteAsset = useDeleteAsset();
   const { data: assetWithTags } = useAsset(position.assetId);
-  const isPositive = position.unrealizedGain >= 0;
   const cur = position.currency || 'INR';
+  const isManual = MANUAL_ASSET_CLASSES.has(position.assetClass);
+  const isMetal = PHYSICAL_METAL_CLASSES.has(position.assetClass);
+
+  // Physical metals: 5% deduction for making charges, impurities, and wear
+  const METAL_SELL_FACTOR = 0.95;
+  const adjPrice = isMetal && position.currentPrice ? position.currentPrice * METAL_SELL_FACTOR : position.currentPrice;
+  const adjValue = isMetal ? position.currentValue * METAL_SELL_FACTOR : position.currentValue;
+  const adjGain = adjValue - position.totalCost;
+  const adjGainPercent = position.totalCost > 0 ? (adjGain / position.totalCost) * 100 : 0;
+  const isPositive = adjGain >= 0;
 
   const handleDelete = () => {
     if (confirm(`Delete ${position.symbol}? This will also delete all transactions.`)) {
@@ -878,6 +958,9 @@ function PositionRow({
           >
             {position.name}
           </span>
+          {isManual && assetWithTags?.institution && (
+            <p className="text-[11px] text-surface-500 mt-0.5">{assetWithTags.institution}</p>
+          )}
           {assetWithTags?.tags && assetWithTags.tags.length > 0 && (
             <div className="flex gap-1 mt-1 flex-wrap">
               {assetWithTags.tags.slice(0, 2).map((tag) => (
@@ -891,13 +974,40 @@ function PositionRow({
         </div>
         {/* Hover actions */}
         <div className="hidden group-hover:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-0.5 bg-surface-800 border border-surface-700 rounded-lg px-1 py-0.5 shadow-lg z-10">
-          <button
-            onClick={onSplitClick}
-            className="p-1.5 rounded text-surface-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-            title="Apply stock split"
-          >
-            <Scissors className="w-3.5 h-3.5" />
-          </button>
+          {isMetal ? (
+            <button
+              onClick={onMetalTransaction}
+              className="p-1.5 rounded text-surface-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+              title="Buy / Sell metal"
+            >
+              <Scale className="w-3.5 h-3.5" />
+            </button>
+          ) : isManual ? (
+            <>
+              <button
+                onClick={onUpdateBalance}
+                className="p-1.5 rounded text-surface-400 hover:text-brand-400 hover:bg-brand-500/10 transition-colors"
+                title="Update balance"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={onDeposit}
+                className="p-1.5 rounded text-surface-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                title="Deposit / Withdraw"
+              >
+                <PiggyBank className="w-3.5 h-3.5" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onSplitClick}
+              className="p-1.5 rounded text-surface-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+              title="Apply stock split"
+            >
+              <Scissors className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={onTagClick}
             className="p-1.5 rounded text-surface-400 hover:text-surface-100 hover:bg-surface-700/50 transition-colors"
@@ -918,26 +1028,35 @@ function PositionRow({
       <td className="table-cell">
         <AssetClassBadge assetClass={position.assetClass} size="sm" />
       </td>
-      <td className="table-cell text-right tabular-nums">{formatNumber(position.quantity)}</td>
+      <td className="table-cell text-right tabular-nums">
+        {formatNumber(position.quantity)}{isMetal && <span className="text-surface-500 text-xs ml-0.5">g</span>}
+      </td>
       <td className="table-cell text-right tabular-nums">
         <CurrencyValue value={position.averageCost} currency={cur} usdToInr={usdToInr} />
       </td>
       <td className="table-cell text-right tabular-nums font-medium text-surface-100">
-        {position.currentPrice
-          ? <CurrencyValue value={position.currentPrice} currency={cur} usdToInr={usdToInr} />
+        {adjPrice
+          ? (
+            <span title={isMetal ? `Market: ${formatCurrency(position.currentPrice!, cur)} · 5% deducted for charges/impurities` : undefined}>
+              <CurrencyValue value={adjPrice} currency={cur} usdToInr={usdToInr} />
+              {isMetal && <span className="text-surface-500 text-[10px] ml-0.5">*</span>}
+            </span>
+          )
           : '—'}
       </td>
       <td className="table-cell text-right tabular-nums">
         <CurrencyValue value={position.totalCost} currency={cur} usdToInr={usdToInr} />
       </td>
       <td className="table-cell text-right tabular-nums font-medium text-surface-100">
-        <CurrencyValue value={position.currentValue} currency={cur} usdToInr={usdToInr} />
+        <span title={isMetal ? 'After 5% selling deduction' : undefined}>
+          <CurrencyValue value={adjValue} currency={cur} usdToInr={usdToInr} />
+        </span>
       </td>
       <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
-        <CurrencyValue value={position.unrealizedGain} currency={cur} usdToInr={usdToInr} sign />
+        <CurrencyValue value={adjGain} currency={cur} usdToInr={usdToInr} sign />
       </td>
       <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
-        {isPositive ? '+' : ''}{formatPercent(position.unrealizedGainPercent)}
+        {isPositive ? '+' : ''}{formatPercent(adjGainPercent)}
       </td>
       <td className="table-cell text-right text-xs text-surface-500" title={assetWithTags?.lastUpdated ? new Date(Number(assetWithTags.lastUpdated)).toLocaleString() : ''}>
         {formatRelativeTime(assetWithTags?.lastUpdated)}
@@ -1058,6 +1177,7 @@ function AddAssetModal({
   isOpen: boolean;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<'market' | 'account' | 'metal'>('market');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [manualMode, setManualMode] = useState(false);
@@ -1095,161 +1215,208 @@ function AddAssetModal({
 
     try {
       await createAsset.mutateAsync(data);
-      onClose();
-      resetForm();
-    } catch (error) {
+      handleClose();
+    } catch {
       // Error handled by mutation
     }
   };
 
-  const resetForm = () => {
+  const handleClose = () => {
     setSearchQuery('');
     setSelectedResult(null);
     setManualMode(false);
     setFormData({ symbol: '', name: '', assetClass: 'stocks' });
+    setTab('market');
+    onClose();
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Asset" size="lg">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Search */}
-        {!manualMode && !selectedResult && (
-          <div>
-            <label className="label">Search for Asset</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by symbol or name (e.g., AAPL, Bitcoin)"
-                className="input pl-10"
-              />
-            </div>
+    <Modal isOpen={isOpen} onClose={handleClose} title="Add Asset" size="lg">
+      {/* Tab toggle */}
+      <div className="flex gap-2 mb-6">
+        <button
+          type="button"
+          onClick={() => { setTab('market'); setManualMode(false); setSelectedResult(null); setSearchQuery(''); }}
+          className={clsx(
+            'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
+            tab === 'market'
+              ? 'border-brand-500 bg-brand-600/20 text-brand-400'
+              : 'border-surface-700 text-surface-400 hover:text-surface-200'
+          )}
+        >
+          Market Asset
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTab('metal'); setManualMode(false); setSelectedResult(null); setSearchQuery(''); }}
+          className={clsx(
+            'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
+            tab === 'metal'
+              ? 'border-amber-500/60 bg-amber-500/15 text-amber-400'
+              : 'border-surface-700 text-surface-400 hover:text-surface-200'
+          )}
+        >
+          Physical Metal
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTab('account'); setManualMode(false); setSelectedResult(null); setSearchQuery(''); }}
+          className={clsx(
+            'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
+            tab === 'account'
+              ? 'border-brand-500 bg-brand-600/20 text-brand-400'
+              : 'border-surface-700 text-surface-400 hover:text-surface-200'
+          )}
+        >
+          Gov / Cash Account
+        </button>
+      </div>
 
-            {/* Search Results */}
-            {searchQuery.length >= 2 && (
-              <div className="mt-3 max-h-60 overflow-y-auto space-y-2">
-                {searching ? (
-                  <p className="text-sm text-surface-500 py-4 text-center">
-                    Searching...
-                  </p>
-                ) : searchResults && searchResults.length > 0 ? (
-                  searchResults.map((result, index) => (
-                    <button
-                      key={`${result.symbol}-${index}`}
-                      type="button"
-                      onClick={() => handleSelectResult(result)}
-                      className="w-full p-3 rounded-xl bg-surface-800/50 hover:bg-surface-700/50 text-left transition-colors flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="font-medium text-surface-100">
-                          {result.symbol}
-                        </p>
-                        <p className="text-sm text-surface-400">{result.name}</p>
-                      </div>
-                      <AssetClassBadge assetClass={result.assetClass} size="sm" />
-                    </button>
-                  ))
-                ) : (
-                  <p className="text-sm text-surface-500 py-4 text-center">
-                    No results found
-                  </p>
-                )}
+      {tab === 'metal' ? (
+        <PhysicalMetalForm onSuccess={handleClose} onCancel={handleClose} />
+      ) : tab === 'account' ? (
+        <ManualAssetForm onSuccess={handleClose} onCancel={handleClose} />
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Search */}
+          {!manualMode && !selectedResult && (
+            <div>
+              <label className="label">Search for Asset</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by symbol or name (e.g., AAPL, Bitcoin)"
+                  className="input pl-10"
+                />
               </div>
-            )}
 
-            <button
-              type="button"
-              onClick={() => setManualMode(true)}
-              className="mt-4 text-sm text-brand-400 hover:text-brand-300"
-            >
-              Or add manually →
-            </button>
-          </div>
-        )}
+              {/* Search Results */}
+              {searchQuery.length >= 2 && (
+                <div className="mt-3 max-h-60 overflow-y-auto space-y-2">
+                  {searching ? (
+                    <p className="text-sm text-surface-500 py-4 text-center">
+                      Searching...
+                    </p>
+                  ) : searchResults && searchResults.length > 0 ? (
+                    searchResults.map((result, index) => (
+                      <button
+                        key={`${result.symbol}-${index}`}
+                        type="button"
+                        onClick={() => handleSelectResult(result)}
+                        className="w-full p-3 rounded-xl bg-surface-800/50 hover:bg-surface-700/50 text-left transition-colors flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-medium text-surface-100">
+                            {result.symbol}
+                          </p>
+                          <p className="text-sm text-surface-400">{result.name}</p>
+                        </div>
+                        <AssetClassBadge assetClass={result.assetClass} size="sm" />
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-surface-500 py-4 text-center">
+                      No results found
+                    </p>
+                  )}
+                </div>
+              )}
 
-        {/* Selected/Manual Form */}
-        {(selectedResult || manualMode) && (
-          <>
-            <div>
-              <label className="label">Symbol</label>
-              <input
-                type="text"
-                value={formData.symbol}
-                onChange={(e) =>
-                  setFormData((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))
-                }
-                className="input"
-                required
-                disabled={!!selectedResult}
-              />
-            </div>
-
-            <div>
-              <label className="label">Name</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData((f) => ({ ...f, name: e.target.value }))
-                }
-                className="input"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="label">Asset Class</label>
-              <select
-                value={formData.assetClass}
-                onChange={(e) =>
-                  setFormData((f) => ({
-                    ...f,
-                    assetClass: e.target.value as AssetClass,
-                  }))
-                }
-                className="input"
-              >
-                {ASSET_CLASSES.map((ac) => (
-                  <option key={ac.value} value={ac.value}>
-                    {ac.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedResult && (
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedResult(null);
-                  setSearchQuery('');
-                }}
-                className="text-sm text-surface-400 hover:text-surface-200"
+                onClick={() => setManualMode(true)}
+                className="mt-4 text-sm text-brand-400 hover:text-brand-300"
               >
-                ← Search for different asset
+                Or add manually →
               </button>
-            )}
-          </>
-        )}
+            </div>
+          )}
 
-        {/* Submit */}
-        {(selectedResult || manualMode) && (
-          <div className="flex justify-end gap-3 pt-4 border-t border-surface-700">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={createAsset.isPending}
-              className="btn btn-primary"
-            >
-              {createAsset.isPending ? 'Adding...' : 'Add Asset'}
-            </button>
-          </div>
-        )}
-      </form>
+          {/* Selected/Manual Form */}
+          {(selectedResult || manualMode) && (
+            <>
+              <div>
+                <label className="label">Symbol</label>
+                <input
+                  type="text"
+                  value={formData.symbol}
+                  onChange={(e) =>
+                    setFormData((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))
+                  }
+                  className="input"
+                  required
+                  disabled={!!selectedResult}
+                />
+              </div>
+
+              <div>
+                <label className="label">Name</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData((f) => ({ ...f, name: e.target.value }))
+                  }
+                  className="input"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="label">Asset Class</label>
+                <select
+                  value={formData.assetClass}
+                  onChange={(e) =>
+                    setFormData((f) => ({
+                      ...f,
+                      assetClass: e.target.value as AssetClass,
+                    }))
+                  }
+                  className="input"
+                >
+                  {ASSET_CLASSES.map((ac) => (
+                    <option key={ac.value} value={ac.value}>
+                      {ac.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedResult && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedResult(null);
+                    setSearchQuery('');
+                  }}
+                  className="text-sm text-surface-400 hover:text-surface-200"
+                >
+                  ← Search for different asset
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Submit */}
+          {(selectedResult || manualMode) && (
+            <div className="flex justify-end gap-3 pt-4 border-t border-surface-700">
+              <button type="button" onClick={handleClose} className="btn btn-secondary">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={createAsset.isPending}
+                className="btn btn-primary"
+              >
+                {createAsset.isPending ? 'Adding...' : 'Add Asset'}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
     </Modal>
   );
 }
