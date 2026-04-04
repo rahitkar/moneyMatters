@@ -20,9 +20,13 @@ import {
   Scale,
   X,
   CheckSquare,
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
+import StatCard from '../components/StatCard';
 import Modal from '../components/Modal';
 import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -640,37 +644,35 @@ export default function Assets() {
           )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <p className="stat-label">Total Value</p>
-            <p className="stat-value text-surface-100">{formatCurrency(totals.current, 'INR')}</p>
-            {totals.currentUsd !== null && (
-              <p className="text-xs text-surface-500 mt-0.5">{formatCurrency(totals.currentUsd, 'USD')}</p>
-            )}
-          </Card>
-          <Card>
-            <p className="stat-label">Current Invested</p>
-            <p className="stat-value text-surface-100">{formatCurrency(totals.invested, 'INR')}</p>
-            {totals.investedUsd !== null && (
-              <p className="text-xs text-surface-500 mt-0.5">{formatCurrency(totals.investedUsd, 'USD')}</p>
-            )}
-          </Card>
-          <Card>
-            <p className="stat-label">Total P&L</p>
-            <p className={clsx('stat-value', totals.pnl >= 0 ? 'text-green-400' : 'text-red-400')}>
-              {totals.pnl >= 0 ? '+' : ''}{formatCurrency(totals.pnl, 'INR')}
-            </p>
-            {totals.pnlUsd !== null && (
-              <p className={clsx('text-xs mt-0.5', totals.pnl >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
-                {totals.pnl >= 0 ? '+' : ''}{formatCurrency(totals.pnlUsd, 'USD')}
-              </p>
-            )}
-          </Card>
-          <Card>
-            <p className="stat-label">P&L %</p>
-            <p className={clsx('stat-value', totals.pnlPercent >= 0 ? 'text-green-400' : 'text-red-400')}>
-              {totals.pnlPercent >= 0 ? '+' : ''}{formatPercent(totals.pnlPercent)}
-            </p>
-          </Card>
+          <StatCard
+            label="Total Value"
+            value={formatCurrency(totals.current, 'INR')}
+            usdSubValue={totals.currentUsd !== null ? formatCurrency(totals.currentUsd, 'USD') : undefined}
+            icon={DollarSign}
+            variant="brand"
+          />
+          <StatCard
+            label="Current Invested"
+            value={formatCurrency(totals.invested, 'INR')}
+            usdSubValue={totals.investedUsd !== null ? formatCurrency(totals.investedUsd, 'USD') : undefined}
+            icon={Wallet}
+            variant="neutral"
+          />
+          <StatCard
+            label="Total P&L"
+            value={`${totals.pnl >= 0 ? '+' : ''}${formatCurrency(totals.pnl, 'INR')}`}
+            usdSubValue={totals.pnlUsd !== null ? `${totals.pnl >= 0 ? '+' : ''}${formatCurrency(totals.pnlUsd, 'USD')}` : undefined}
+            icon={totals.pnl >= 0 ? TrendingUp : TrendingDown}
+            isPositive={totals.pnl >= 0}
+          />
+          <StatCard
+            label="P&L %"
+            value={`${totals.pnlPercent >= 0 ? '+' : ''}${formatPercent(totals.pnlPercent)}`}
+            usdSubValue={`${totals.pnl >= 0 ? '+' : ''}${formatCurrency(totals.pnl, 'INR')}`}
+            subValue={`on ${formatCurrency(totals.invested, 'INR')} invested`}
+            icon={totals.pnlPercent >= 0 ? TrendingUp : TrendingDown}
+            isPositive={totals.pnlPercent >= 0}
+          />
         </div>
         </div>
       )}

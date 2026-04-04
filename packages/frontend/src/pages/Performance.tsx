@@ -9,9 +9,10 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Activity, BarChart3, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Download, Activity } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
+import StatCard from '../components/StatCard';
 import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import AssetClassBadge from '../components/AssetClassBadge';
@@ -273,30 +274,29 @@ export default function Performance() {
             value={formatCurrency(comparison.portfolio.endValue, 'INR')}
             usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.endValue / usdToInr, 'USD') : undefined}
             subValue={`Invested: ${formatCurrency(comparison.portfolio.totalCost, 'INR')}`}
-            isPositive={true}
-            neutral
-            icon={Activity}
+            icon={DollarSign}
+            variant="brand"
           />
           <StatCard
             label="Total P&L"
-            value={formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}
-            usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.absoluteReturn / usdToInr, 'USD') : undefined}
+            value={`${comparison.portfolio.absoluteReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}`}
+            usdSubValue={usdToInr ? `${comparison.portfolio.absoluteReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn / usdToInr, 'USD')}` : undefined}
+            icon={comparison.portfolio.absoluteReturn >= 0 ? TrendingUp : TrendingDown}
             isPositive={comparison.portfolio.absoluteReturn >= 0}
-            icon={BarChart3}
           />
           <StatCard
             label="Unrealized"
-            value={formatCurrency(comparison.portfolio.unrealizedGains, 'INR')}
-            usdSubValue={usdToInr ? formatCurrency(comparison.portfolio.unrealizedGains / usdToInr, 'USD') : undefined}
+            value={`${comparison.portfolio.unrealizedGains >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.unrealizedGains, 'INR')}`}
+            usdSubValue={usdToInr ? `${comparison.portfolio.unrealizedGains >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.unrealizedGains / usdToInr, 'USD')}` : undefined}
+            icon={comparison.portfolio.unrealizedGains >= 0 ? TrendingUp : TrendingDown}
             isPositive={comparison.portfolio.unrealizedGains >= 0}
-            icon={BarChart3}
           />
           <StatCard
             label="Realized"
-            value={formatCurrency(realizedGains ?? 0, 'INR')}
-            usdSubValue={usdToInr ? formatCurrency((realizedGains ?? 0) / usdToInr, 'USD') : undefined}
+            value={`${(realizedGains ?? 0) >= 0 ? '+' : ''}${formatCurrency(realizedGains ?? 0, 'INR')}`}
+            usdSubValue={usdToInr ? `${(realizedGains ?? 0) >= 0 ? '+' : ''}${formatCurrency((realizedGains ?? 0) / usdToInr, 'USD')}` : undefined}
+            icon={(realizedGains ?? 0) >= 0 ? TrendingUp : TrendingDown}
             isPositive={(realizedGains ?? 0) >= 0}
-            icon={BarChart3}
           />
         </div>
       )}
@@ -506,58 +506,6 @@ export default function Performance() {
       </Card>
       </div>
     </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  subValue,
-  usdSubValue,
-  isPositive,
-  icon: Icon,
-  neutral,
-}: {
-  label: string;
-  value: string;
-  subValue?: string;
-  usdSubValue?: string;
-  isPositive: boolean;
-  icon: React.ElementType;
-  neutral?: boolean;
-}) {
-  return (
-    <Card>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="stat-label">{label}</p>
-          <p
-            className={clsx(
-              'text-2xl font-bold',
-              neutral ? 'text-surface-100' : isPositive ? 'text-green-400' : 'text-red-400'
-            )}
-          >
-            {value}
-          </p>
-          {usdSubValue && (
-            <p className={clsx('text-[10px] mt-0.5', neutral ? 'text-surface-500' : isPositive ? 'text-green-400/60' : 'text-red-400/60')}>
-              {usdSubValue}
-            </p>
-          )}
-          {subValue && <p className="text-sm text-surface-500 mt-1">{subValue}</p>}
-        </div>
-        <div
-          className={clsx(
-            'p-3 rounded-xl',
-            neutral ? 'bg-surface-700/50' : isPositive ? 'bg-green-500/20' : 'bg-red-500/20'
-          )}
-        >
-          <Icon
-            className={clsx('w-5 h-5', neutral ? 'text-surface-400' : isPositive ? 'text-green-400' : 'text-red-400')}
-          />
-        </div>
-      </div>
-    </Card>
   );
 }
 

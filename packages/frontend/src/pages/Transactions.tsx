@@ -6,9 +6,14 @@ import {
   ArrowDownRight,
   History,
   Search,
+  Activity,
+  Wallet,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
+import StatCard from '../components/StatCard';
 import Modal from '../components/Modal';
 import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -110,75 +115,35 @@ export default function Transactions() {
         </p>
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <p className="stat-label">Transactions</p>
-          <p className="stat-value text-surface-100">{stats.count}</p>
-        </Card>
-        <Card>
-          <p className="stat-label">Total Invested</p>
-          <p className="stat-value text-surface-100">
-            {formatCurrency(stats.totalBuyValue, 'INR')}
-          </p>
-          {usdToInr && (
-            <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(stats.totalBuyValue / usdToInr, 'USD')}</p>
-          )}
-        </Card>
-        <Card>
-          <p className="stat-label">Realized P&L</p>
-          <p
-            className={clsx(
-              'stat-value',
-              stats.realizedGain >= 0 ? 'text-green-400' : 'text-red-400'
-            )}
-          >
-            {stats.realizedGain >= 0 ? '+' : ''}
-            {formatCurrency(stats.realizedGain, 'INR')}
-          </p>
-          {usdToInr && (
-            <p className={clsx('text-[10px] mt-0.5', stats.realizedGain >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
-              {stats.realizedGain >= 0 ? '+' : ''}{formatCurrency(stats.realizedGain / usdToInr, 'USD')}
-            </p>
-          )}
-          {stats.realizedPct !== 0 && (
-            <p
-              className={clsx(
-                'text-xs mt-1',
-                stats.realizedPct >= 0 ? 'text-green-400/70' : 'text-red-400/70'
-              )}
-            >
-              {stats.realizedPct >= 0 ? '+' : ''}
-              {stats.realizedPct.toFixed(2)}%
-            </p>
-          )}
-        </Card>
-        <Card>
-          <p className="stat-label">Unrealized P&L</p>
-          <p
-            className={clsx(
-              'stat-value',
-              stats.unrealizedGain >= 0 ? 'text-green-400' : 'text-red-400'
-            )}
-          >
-            {stats.unrealizedGain >= 0 ? '+' : ''}
-            {formatCurrency(stats.unrealizedGain, 'INR')}
-          </p>
-          {usdToInr && (
-            <p className={clsx('text-[10px] mt-0.5', stats.unrealizedGain >= 0 ? 'text-green-400/60' : 'text-red-400/60')}>
-              {stats.unrealizedGain >= 0 ? '+' : ''}{formatCurrency(stats.unrealizedGain / usdToInr, 'USD')}
-            </p>
-          )}
-          {stats.unrealizedPct !== 0 && (
-            <p
-              className={clsx(
-                'text-xs mt-1',
-                stats.unrealizedPct >= 0 ? 'text-green-400/70' : 'text-red-400/70'
-              )}
-            >
-              {stats.unrealizedPct >= 0 ? '+' : ''}
-              {stats.unrealizedPct.toFixed(2)}%
-            </p>
-          )}
-        </Card>
+        <StatCard
+          label="Transactions"
+          value={String(stats.count)}
+          icon={Activity}
+          variant="neutral"
+        />
+        <StatCard
+          label="Total Invested"
+          value={formatCurrency(stats.totalBuyValue, 'INR')}
+          usdSubValue={usdToInr ? formatCurrency(stats.totalBuyValue / usdToInr, 'USD') : undefined}
+          icon={Wallet}
+          variant="neutral"
+        />
+        <StatCard
+          label="Realized P&L"
+          value={`${stats.realizedGain >= 0 ? '+' : ''}${formatCurrency(stats.realizedGain, 'INR')}`}
+          usdSubValue={usdToInr ? `${stats.realizedGain >= 0 ? '+' : ''}${formatCurrency(stats.realizedGain / usdToInr, 'USD')}` : undefined}
+          subValue={stats.realizedPct !== 0 ? `${stats.realizedPct >= 0 ? '+' : ''}${stats.realizedPct.toFixed(2)}%` : undefined}
+          icon={stats.realizedGain >= 0 ? TrendingUp : TrendingDown}
+          isPositive={stats.realizedGain >= 0}
+        />
+        <StatCard
+          label="Unrealized P&L"
+          value={`${stats.unrealizedGain >= 0 ? '+' : ''}${formatCurrency(stats.unrealizedGain, 'INR')}`}
+          usdSubValue={usdToInr ? `${stats.unrealizedGain >= 0 ? '+' : ''}${formatCurrency(stats.unrealizedGain / usdToInr, 'USD')}` : undefined}
+          subValue={stats.unrealizedPct !== 0 ? `${stats.unrealizedPct >= 0 ? '+' : ''}${stats.unrealizedPct.toFixed(2)}%` : undefined}
+          icon={stats.unrealizedGain >= 0 ? TrendingUp : TrendingDown}
+          isPositive={stats.unrealizedGain >= 0}
+        />
       </div>
 
       {/* Search */}

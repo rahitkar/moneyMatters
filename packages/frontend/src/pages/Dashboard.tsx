@@ -5,7 +5,6 @@ import {
   TrendingDown,
   Wallet,
   DollarSign,
-  PieChart,
   Activity,
   ArrowRight,
 } from 'lucide-react';
@@ -23,6 +22,7 @@ import {
 } from 'recharts';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
+import StatCard from '../components/StatCard';
 import { LoadingPage } from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 // AssetClassBadge not needed — multi-dim allocation uses label strings
@@ -295,98 +295,39 @@ export default function Dashboard() {
         </p>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="animate-slide-up">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label">Total Value</p>
-              <p className="stat-value text-surface-100">
-                {formatCurrency(summary.totalValue, 'INR')}
-              </p>
-              {usdToInr && (
-                <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(summary.totalValue / usdToInr, 'USD')}</p>
-              )}
-            </div>
-            <div className="p-3 rounded-xl bg-brand-500/20">
-              <DollarSign className="w-6 h-6 text-brand-400" />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="animate-slide-up animate-delay-100">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label">Current Invested</p>
-              <p className="stat-value text-surface-100">
-                {formatCurrency(summary.totalCost, 'INR')}
-              </p>
-              {usdToInr && (
-                <p className="text-[10px] text-surface-500 mt-0.5">{formatCurrency(summary.totalCost / usdToInr, 'USD')}</p>
-              )}
-            </div>
-            <div className="p-3 rounded-xl bg-surface-700/50">
-              <Wallet className="w-6 h-6 text-surface-400" />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="animate-slide-up animate-delay-200">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label">Total P&L</p>
-              <p
-                className={clsx(
-                  'stat-value',
-                  isPositive ? 'text-green-400' : 'text-red-400'
-                )}
-              >
-                {isPositive ? '+' : ''}
-                {formatCurrency(summary.totalGain, 'INR')}
-              </p>
-              {usdToInr && (
-                <p className={clsx('text-[10px] mt-0.5', isPositive ? 'text-green-400/60' : 'text-red-400/60')}>
-                  {isPositive ? '+' : ''}{formatCurrency(summary.totalGain / usdToInr, 'USD')}
-                </p>
-              )}
-            </div>
-            <div
-              className={clsx(
-                'p-3 rounded-xl',
-                isPositive ? 'bg-green-500/20' : 'bg-red-500/20'
-              )}
-            >
-              {isPositive ? (
-                <TrendingUp className="w-6 h-6 text-green-400" />
-              ) : (
-                <TrendingDown className="w-6 h-6 text-red-400" />
-              )}
-            </div>
-          </div>
-        </Card>
-
-        <Card className="animate-slide-up animate-delay-300">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="stat-label">P&L %</p>
-              <p
-                className={clsx(
-                  'stat-value',
-                  isPositive ? 'text-green-400' : 'text-red-400'
-                )}
-              >
-                {isPositive ? '+' : ''}
-                {formatPercent(summary.totalGainPercent)}
-              </p>
-            </div>
-            <div
-              className={clsx(
-                'p-3 rounded-xl',
-                isPositive ? 'bg-green-500/20' : 'bg-red-500/20'
-              )}
-            >
-              <PieChart className="w-6 h-6 text-surface-400" />
-            </div>
-          </div>
-        </Card>
+        <StatCard
+          label="Total Value"
+          value={formatCurrency(summary.totalValue, 'INR')}
+          usdSubValue={usdToInr ? formatCurrency(summary.totalValue / usdToInr, 'USD') : undefined}
+          icon={DollarSign}
+          variant="brand"
+          className="animate-slide-up"
+        />
+        <StatCard
+          label="Current Invested"
+          value={formatCurrency(summary.totalCost, 'INR')}
+          usdSubValue={usdToInr ? formatCurrency(summary.totalCost / usdToInr, 'USD') : undefined}
+          icon={Wallet}
+          variant="neutral"
+          className="animate-slide-up animate-delay-100"
+        />
+        <StatCard
+          label="Total P&L"
+          value={`${isPositive ? '+' : ''}${formatCurrency(summary.totalGain, 'INR')}`}
+          usdSubValue={usdToInr ? `${isPositive ? '+' : ''}${formatCurrency(summary.totalGain / usdToInr, 'USD')}` : undefined}
+          icon={isPositive ? TrendingUp : TrendingDown}
+          isPositive={isPositive}
+          className="animate-slide-up animate-delay-200"
+        />
+        <StatCard
+          label="P&L %"
+          value={`${isPositive ? '+' : ''}${formatPercent(summary.totalGainPercent)}`}
+          usdSubValue={`${isPositive ? '+' : ''}${formatCurrency(summary.totalGain, 'INR')}`}
+          subValue={`on ${formatCurrency(summary.totalCost, 'INR')} invested`}
+          icon={isPositive ? TrendingUp : TrendingDown}
+          isPositive={isPositive}
+          className="animate-slide-up animate-delay-300"
+        />
       </div>
 
       {/* Allocation Chart & Holdings */}
