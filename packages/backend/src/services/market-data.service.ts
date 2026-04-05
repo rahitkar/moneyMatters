@@ -8,6 +8,7 @@ import { indiaMfNavProvider } from '../providers/india-mf-nav.provider.js';
 import { assetService } from './asset.service.js';
 import { db, schema } from '../db/index.js';
 import type { AssetClass, Provider } from '../db/schema.js';
+import { dateToLocal } from '../lib/date.js';
 
 const MANUAL_MF_CLASSES: AssetClass[] = [
   'mutual_fund',
@@ -396,7 +397,7 @@ export const marketDataService = {
         const seenDates = new Set<string>();
         const rows = prices
           .filter((p) => {
-            const dateStr = p.date.toISOString().split('T')[0];
+            const dateStr = dateToLocal(p.date);
             if (p.price <= 0 || existingDates.has(dateStr) || seenDates.has(dateStr)) return false;
             seenDates.add(dateStr);
             return true;

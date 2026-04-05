@@ -253,7 +253,7 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'external_portfolio', label: 'External Portfolio' },
 ];
 
-type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent';
+type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent' | 'weight';
 type SortDirection = 'asc' | 'desc';
 
 function compareFn(a: Position, b: Position, field: SortField, dir: SortDirection, usdToInr: number | null): number {
@@ -289,6 +289,9 @@ function compareFn(a: Position, b: Position, field: SortField, dir: SortDirectio
       break;
     case 'pnlPercent':
       cmp = a.unrealizedGainPercent - b.unrealizedGainPercent;
+      break;
+    case 'weight':
+      cmp = inr(a.currentValue, a.currency) - inr(b.currentValue, b.currency);
       break;
   }
   return dir === 'asc' ? cmp : -cmp;
@@ -938,6 +941,7 @@ export default function Assets() {
                   <SortableHeader field="invested" label="Invested" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="pnl" label="P&L" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="pnlPercent" label="P&L%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <SortableHeader field="weight" label="Wt%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <th className="table-header text-right">Upd.</th>
                 </tr>
               </thead>
@@ -947,6 +951,7 @@ export default function Assets() {
                     <PositionRow
                       position={position}
                       usdToInr={usdToInr}
+                      totalValue={totals?.current ?? 0}
                       isExpanded={expandedAssetId === position.assetId}
                       bulkSelectMode={bulkSelectMode}
                       isSelected={selectedAssets.has(position.assetId)}
@@ -1124,6 +1129,7 @@ function SortableHeader({
 function PositionRow({
   position,
   usdToInr,
+  totalValue,
   isExpanded,
   bulkSelectMode,
   isSelected,
@@ -1137,6 +1143,7 @@ function PositionRow({
 }: {
   position: Position;
   usdToInr: number | null;
+  totalValue: number;
   isExpanded: boolean;
   bulkSelectMode: boolean;
   isSelected: boolean;
@@ -1305,6 +1312,9 @@ function PositionRow({
       <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
         {isPositive ? '+' : ''}{formatPercent(adjGainPercent)}
       </td>
+      <td className="table-cell text-right tabular-nums text-surface-300 text-xs">
+        {totalValue > 0 ? formatPercent((toInr(adjValue, cur, usdToInr) / totalValue) * 100) : '—'}
+      </td>
       <td className="table-cell text-right text-xs text-surface-500" title={assetWithTags?.lastUpdated ? new Date(Number(assetWithTags.lastUpdated)).toLocaleString() : ''}>
         {formatRelativeTime(assetWithTags?.lastUpdated)}
       </td>
@@ -1354,6 +1364,7 @@ function TransactionRows({
                   <th className={clsx(thClass, 'text-right')}>Current</th>
                   <th className={clsx(thClass, 'text-right')}>P&L</th>
                   <th className={clsx(thClass, 'text-right')}>P&L %</th>
+                  <th className={clsx(thClass, 'text-left')}>Source</th>
                   <th className={clsx(thClass, 'text-left')}>Notes</th>
                 </tr>
               </thead>
@@ -1403,6 +1414,11 @@ function TransactionRows({
                         {isBuy
                           ? <>{isPositive ? '+' : ''}{formatPercent(pnlPct)}</>
                           : '—'}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-surface-500 truncate max-w-[120px]">
+                        {tx.fundSource ? (
+                          <span className="text-brand-400 text-xs">{tx.fundSource.name}</span>
+                        ) : '—'}
                       </td>
                       <td className="py-2 px-3 text-sm text-surface-500 truncate max-w-[120px]">{tx.notes || '—'}</td>
                     </tr>

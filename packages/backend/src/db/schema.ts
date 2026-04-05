@@ -117,6 +117,7 @@ export const transactions = sqliteTable('transactions', {
   quantity: real('quantity').notNull(),
   price: real('price').notNull(),
   fees: real('fees').default(0),
+  fundSourceId: text('fund_source_id').references(() => assets.id, { onDelete: 'set null' }),
   transactionDate: text('transaction_date').notNull(), // ISO date string
   notes: text('notes'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
@@ -175,6 +176,118 @@ export const realizedGains = sqliteTable('realized_gains', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
+// ── App Settings ───────────────────────────────────────────────────
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});
+
+export type AppSetting = typeof appSettings.$inferSelect;
+
+// ── Cash Flow ──────────────────────────────────────────────────────
+
+export const CASH_FLOW_CATEGORY_TYPES = ['income', 'expense'] as const;
+export type CashFlowCategoryType = (typeof CASH_FLOW_CATEGORY_TYPES)[number];
+
+export const EXPENSE_TAGS = ['need', 'luxury'] as const;
+export type ExpenseTag = (typeof EXPENSE_TAGS)[number];
+
+export const cashFlowCategories = sqliteTable('cash_flow_categories', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type').notNull().$type<CashFlowCategoryType>(),
+  tag: text('tag').$type<ExpenseTag>(),
+  defaultBudget: real('default_budget').default(0),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const cashFlowEntries = sqliteTable('cash_flow_entries', {
+  id: text('id').primaryKey(),
+  categoryId: text('category_id')
+    .notNull()
+    .references(() => cashFlowCategories.id, { onDelete: 'cascade' }),
+  entryMonth: text('entry_month').notNull(), // YYYY-MM
+  budget: real('budget').default(0),
+  actual: real('actual').default(0),
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const monthlyIncome = sqliteTable('monthly_income', {
+  id: text('id').primaryKey(),
+  entryMonth: text('entry_month').notNull().unique(),
+  salary: real('salary').notNull().default(0),
+  otherIncome: real('other_income').default(0),
+  openingBalance: real('opening_balance'),
+  expenseLimit: real('expense_limit'),
+  investmentTarget: real('investment_target'),
+  savingsTarget: real('savings_target'),
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const PAYMENT_METHOD_TYPES = ['cash', 'credit_card', 'debit_card', 'upi', 'bank_transfer'] as const;
+export type PaymentMethodType = (typeof PAYMENT_METHOD_TYPES)[number];
+
+export const paymentMethods = sqliteTable('payment_methods', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type').notNull().$type<PaymentMethodType>(),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const cashFlowSpends = sqliteTable('cash_flow_spends', {
+  id: text('id').primaryKey(),
+  categoryId: text('category_id')
+    .notNull()
+    .references(() => cashFlowCategories.id, { onDelete: 'cascade' }),
+  paymentMethodId: text('payment_method_id')
+    .notNull()
+    .references(() => paymentMethods.id, { onDelete: 'cascade' }),
+  amount: real('amount').notNull(),
+  description: text('description'),
+  spendDate: text('spend_date').notNull(), // ISO date string
+  entryMonth: text('entry_month').notNull(), // YYYY-MM for fast lookups
+  type: text('type').notNull().$type<CashFlowCategoryType>(), // 'expense' | 'income'
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const netWorthTargets = sqliteTable('net_worth_targets', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  startingValue: real('starting_value').notNull(),
+  monthlyInvestment: real('monthly_investment').notNull(),
+  yearlyReturnRate: real('yearly_return_rate').notNull(),
+  stretchMonthlyInvestment: real('stretch_monthly_investment'),
+  startDate: text('start_date').notNull(), // YYYY-MM
+  endDate: text('end_date').notNull(), // YYYY-MM
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+// ── FIRE Simulation ────────────────────────────────────────────────
+
+export const fireSimulations = sqliteTable('fire_simulations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  currentAge: integer('current_age').notNull(),
+  retirementAge: integer('retirement_age').notNull(),
+  lifeExpectancy: integer('life_expectancy').notNull(),
+  currentSavings: real('current_savings').notNull(),
+  monthlySaving: real('monthly_saving').notNull(),
+  annualSavingsIncrease: real('annual_savings_increase').notNull(), // fraction, e.g. 0.22
+  returnOnInvestment: real('return_on_investment').notNull(),       // fraction, e.g. 0.125
+  capitalGainTax: real('capital_gain_tax').notNull(),               // fraction, e.g. 0.125
+  postRetirementMonthlyExpense: real('post_retirement_monthly_expense').notNull(),
+  inflationRate: real('inflation_rate').notNull(),                  // fraction, e.g. 0.09
+  startYear: integer('start_year').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
 // Type exports for use in services
 export type Asset = typeof assets.$inferSelect;
 export type NewAsset = typeof assets.$inferInsert;
@@ -192,3 +305,10 @@ export type Benchmark = typeof benchmarks.$inferSelect;
 export type NewBenchmark = typeof benchmarks.$inferInsert;
 export type BenchmarkPrice = typeof benchmarkPrices.$inferSelect;
 export type RealizedGain = typeof realizedGains.$inferSelect;
+export type CashFlowCategory = typeof cashFlowCategories.$inferSelect;
+export type CashFlowEntry = typeof cashFlowEntries.$inferSelect;
+export type MonthlyIncome = typeof monthlyIncome.$inferSelect;
+export type PaymentMethod = typeof paymentMethods.$inferSelect;
+export type CashFlowSpend = typeof cashFlowSpends.$inferSelect;
+export type NetWorthTarget = typeof netWorthTargets.$inferSelect;
+export type FireSimulation = typeof fireSimulations.$inferSelect;

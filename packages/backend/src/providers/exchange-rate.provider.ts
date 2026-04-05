@@ -1,4 +1,5 @@
 import YahooFinance from 'yahoo-finance2';
+import { todayLocal } from '../lib/date.js';
 
 const EXCHANGE_API = 'https://api.frankfurter.app';
 
@@ -43,7 +44,7 @@ export const exchangeRateProvider = {
     const cached = rateCache.get(key);
     if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.rate;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
 
     // Yahoo Finance (live market rate) → fallback to frankfurter (ECB reference rate)
     let rate = await yahooFxRate(from, to);

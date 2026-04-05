@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { AssetClass } from '../api/types';
 import { useCreateAsset, useCreateTransaction } from '../api/hooks';
+import { todayLocal } from '../lib/format';
 
 const CURRENCY_ELIGIBLE: Set<AssetClass> = new Set(['cash', 'fixed_deposit', 'bonds', 'lended']);
 
@@ -50,7 +51,7 @@ export default function ManualAssetForm({ onSuccess, onCancel }: ManualAssetForm
   const [initialBalance, setInitialBalance] = useState('');
   const [interestRate, setInterestRate] = useState('');
   const [maturityDate, setMaturityDate] = useState('');
-  const [depositDate, setDepositDate] = useState(new Date().toISOString().split('T')[0]);
+  const [depositDate, setDepositDate] = useState(todayLocal());
   const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
 
   const showCurrency = CURRENCY_ELIGIBLE.has(assetClass);

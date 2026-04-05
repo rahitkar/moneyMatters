@@ -6,6 +6,7 @@ import { holdingService } from '../services/holding.service.js';
 import { transactionService } from '../services/transaction.service.js';
 import { marketDataService } from '../services/market-data.service.js';
 import { ASSET_CLASSES, TRANSACTION_TYPES, type AssetClass, type TransactionType } from '../db/schema.js';
+import { dateToLocal } from '../lib/date.js';
 import {
   isMutualFundRow,
   normalizeFundLabel,
@@ -26,6 +27,7 @@ const importRowSchema = z.object({
 const importDataSchema = z.object({
   rows: z.array(importRowSchema),
   skipExisting: z.boolean().optional().default(false),
+  fundSourceId: z.string().optional(),
 });
 
 const csvMappingSchema = z.object({
@@ -334,7 +336,8 @@ export async function importRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const importResult = await importTradebook(rows, kind);
+    const fundSourceId = await resolveFundSource(kind);
+    const importResult = await importTradebook(rows, kind, fundSourceId);
 
     return {
       success: true,
@@ -342,6 +345,7 @@ export async function importRoutes(fastify: FastifyInstance) {
         ...importResult,
         parseErrors,
         filteredOut,
+        fundSourceId,
       },
     };
   });
@@ -361,7 +365,7 @@ function formatDate(dateStr: string | undefined, format: string = 'YYYY-MM-DD'):
   // Try to parse common formats
   const date = new Date(cleaned);
   if (!isNaN(date.getTime())) {
-    return date.toISOString().split('T')[0];
+    return dateToLocal(date);
   }
 
   // Handle MM/DD/YYYY
@@ -479,9 +483,43 @@ function detectAssetClass(symbol: string): AssetClass {
 }
 
 // Import tradebook transactions (caller must pass rows that all match `kind`)
+async function resolveFundSource(kind: 'stocks' | 'mutual_funds' | 'holdings', hint?: string): Promise<string | null> {
+  const { db } = await import('../db/index.js');
+  const { assets } = await import('../db/schema.js');
+  const { eq } = await import('drizzle-orm');
+
+  if (hint) {
+    const exact = await db.select({ id: assets.id }).from(assets).where(eq(assets.id, hint)).limit(1).then((r) => r[0]);
+    if (exact) return exact.id;
+  }
+
+  // Zerodha stock imports → look for a "Zerodha" cash asset
+  if (kind === 'stocks') {
+    const match = await db.select({ id: assets.id, name: assets.name })
+      .from(assets)
+      .where(eq(assets.assetClass, 'cash'))
+      .all();
+    const z = match.find((a) => /zerodha/i.test(a.name));
+    return z?.id ?? null;
+  }
+
+  // MF imports → look for a bank/savings cash asset (not Zerodha/IndMoney)
+  if (kind === 'mutual_funds') {
+    const match = await db.select({ id: assets.id, name: assets.name })
+      .from(assets)
+      .where(eq(assets.assetClass, 'cash'))
+      .all();
+    const bank = match.find((a) => /bank|kotak|savings/i.test(a.name));
+    return bank?.id ?? null;
+  }
+
+  return null;
+}
+
 async function importTradebook(
   rows: TradebookRow[],
-  kind: 'stocks' | 'mutual_funds'
+  kind: 'stocks' | 'mutual_funds',
+  fundSourceId?: string | null,
 ): Promise<{
   imported: number;
   skipped: number;
@@ -640,6 +678,7 @@ async function importTradebook(
           quantity: tx.quantity,
           price: tx.price,
           fees: 0,
+          fundSourceId: fundSourceId ?? undefined,
           transactionDate: formatDate(tx.tradeDate),
           notes: tx.exchange ? `${tx.exchange}` : undefined,
         });

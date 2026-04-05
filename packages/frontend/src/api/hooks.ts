@@ -392,6 +392,7 @@ export function useImportHoldings() {
         notes?: string;
       }>;
       skipExisting?: boolean;
+      fundSourceId?: string;
     }) => api.post<{ success: boolean; results: { imported: number; skipped: number; errors: Array<{ row: number; error: string }> } }>('/import/holdings', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.assets });
@@ -487,6 +488,7 @@ export function useCreateTransaction() {
       quantity: number;
       price: number;
       fees?: number;
+      fundSourceId?: string;
       transactionDate: string;
       notes?: string;
     }) => api.post<{ transaction: Transaction }>('/transactions', data),
@@ -642,5 +644,324 @@ export function useBackfillPrices() {
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolioHoldings });
     },
+  });
+}
+
+// ── Cash Flow Settings ──────────────────────────────────────────
+
+export function useCashFlowSettings() {
+  return useQuery({
+    queryKey: ['cashflow', 'settings'] as const,
+    queryFn: () => api.get<import('./types').CashFlowSettings>('/cash-flow/settings'),
+  });
+}
+
+export function useUpdateCashFlowSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { cycleStartDay?: number; dob?: string }) =>
+      api.put<import('./types').CashFlowSettings>('/cash-flow/settings', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cashflow'] });
+    },
+  });
+}
+
+// ── Cash Flow hooks ─────────────────────────────────────────────
+
+export function useCashFlowCategories() {
+  return useQuery({
+    queryKey: ['cashflow', 'categories'] as const,
+    queryFn: () => api.get<{ categories: import('./types').CashFlowCategory[] }>('/cash-flow/categories').then((r) => r.categories),
+  });
+}
+
+export function useCashFlowSummary(month: string) {
+  return useQuery({
+    queryKey: ['cashflow', 'summary', month] as const,
+    queryFn: () => api.get<{ summary: import('./types').CashFlowMonthSummary }>(`/cash-flow/summary?month=${month}`).then((r) => r.summary),
+    enabled: !!month,
+  });
+}
+
+export function useCashFlowYearly(year: string) {
+  return useQuery({
+    queryKey: ['cashflow', 'yearly', year] as const,
+    queryFn: () => api.get<{ summary: import('./types').CashFlowYearlySummary }>(`/cash-flow/yearly?year=${year}`).then((r) => r.summary),
+    enabled: !!year,
+  });
+}
+
+export function useCashFlowIncome(month: string) {
+  return useQuery({
+    queryKey: ['cashflow', 'income', month] as const,
+    queryFn: () => api.get<{ income: import('./types').MonthlyIncome | null }>(`/cash-flow/income?month=${month}`).then((r) => r.income),
+    enabled: !!month,
+  });
+}
+
+export function useCreateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; type: 'income' | 'expense'; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
+      api.post<{ category: import('./types').CashFlowCategory }>('/cash-flow/categories', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useUpdateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name?: string; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
+      api.put<{ category: import('./types').CashFlowCategory }>(`/cash-flow/categories/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useDeleteCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/cash-flow/categories/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useUpsertEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { categoryId: string; entryMonth: string; budget?: number; actual?: number; notes?: string }) =>
+      api.post<{ entry: import('./types').CashFlowEntry }>('/cash-flow/entries', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useUpdateEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; budget?: number; actual?: number; notes?: string }) =>
+      api.put<{ entry: import('./types').CashFlowEntry }>(`/cash-flow/entries/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useDeleteEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/cash-flow/entries/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useUpsertMonthConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ month, ...data }: {
+      month: string;
+      openingBalance?: number;
+      expenseLimit?: number;
+      investmentTarget?: number;
+      savingsTarget?: number;
+      notes?: string;
+    }) =>
+      api.put<{ income: import('./types').MonthlyIncome }>(`/cash-flow/income?month=${month}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useInitMonth() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (month: string) => api.post<{ created: number }>('/cash-flow/init-month', { month }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+// ── Payment Method hooks ────────────────────────────────────────
+
+export function usePaymentMethods() {
+  return useQuery({
+    queryKey: ['cashflow', 'payment-methods'] as const,
+    queryFn: () => api.get<{ methods: import('./types').PaymentMethod[] }>('/cash-flow/payment-methods').then((r) => r.methods),
+  });
+}
+
+export function useCreatePaymentMethod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; type: import('./types').PaymentMethodType }) =>
+      api.post<{ method: import('./types').PaymentMethod }>('/cash-flow/payment-methods', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useDeletePaymentMethod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/cash-flow/payment-methods/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+// ── Spend hooks ─────────────────────────────────────────────────
+
+export function useAddSpend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { categoryId: string; paymentMethodId: string; amount: number; description?: string; spendDate: string; type: 'expense' | 'income' }) =>
+      api.post<{ spend: import('./types').CashFlowSpend }>('/cash-flow/spends', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useUpdateSpend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; categoryId?: string; paymentMethodId?: string; amount?: number; description?: string; spendDate?: string }) =>
+      api.put<{ spend: import('./types').CashFlowSpend }>(`/cash-flow/spends/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+export function useDeleteSpend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/cash-flow/spends/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
+  });
+}
+
+// ── Goal hooks ──────────────────────────────────────────────────
+
+export function useGoalTargets() {
+  return useQuery({
+    queryKey: ['goals', 'targets'] as const,
+    queryFn: () => api.get<{ targets: import('./types').NetWorthTarget[] }>('/goals/targets').then((r) => r.targets),
+  });
+}
+
+export function useGoalProjection(id: string | null) {
+  return useQuery({
+    queryKey: ['goals', 'projection', id] as const,
+    queryFn: () => api.get<{ projection: import('./types').TargetProjection }>(`/goals/targets/${id}/projection`).then((r) => r.projection),
+    enabled: !!id,
+  });
+}
+
+export function useCreateTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; startingValue: number; monthlyInvestment: number; yearlyReturnRate: number; stretchMonthlyInvestment?: number; startDate: string; endDate: string }) =>
+      api.post<{ target: import('./types').NetWorthTarget }>('/goals/targets', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); },
+  });
+}
+
+export function useUpdateTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
+      api.put<{ target: import('./types').NetWorthTarget }>(`/goals/targets/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); },
+  });
+}
+
+export function useDeleteTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/goals/targets/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); },
+  });
+}
+
+// ── FIRE Simulation hooks ───────────────────────────────────────
+
+export function useFireSimulations() {
+  return useQuery({
+    queryKey: ['fire', 'simulations'] as const,
+    queryFn: () => api.get<{ simulations: import('./types').FireSimulation[] }>('/fire/simulations').then((r) => r.simulations),
+  });
+}
+
+export function useFireAutoSeed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ result: { created: number; updated: number } }>('/fire/auto-seed'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fire'] }); },
+  });
+}
+
+export function useFireSyncPortfolio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ result: { synced: number; liveValue: number } }>('/fire/sync-portfolio'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fire'] }); },
+  });
+}
+
+export function useFireCompare() {
+  return useQuery({
+    queryKey: ['fire', 'compare'] as const,
+    queryFn: () => api.get<{ data: import('./types').FireComparisonData }>('/fire/compare').then((r) => r.data),
+  });
+}
+
+export function useFireMonthlyTargets(fy?: number) {
+  return useQuery({
+    queryKey: ['fire', 'monthly-targets', fy] as const,
+    queryFn: () =>
+      api.get<{ data: import('./types').FireMonthlyTargetData }>(
+        fy ? `/fire/monthly-targets?fy=${fy}` : '/fire/monthly-targets',
+      ).then((r) => r.data),
+  });
+}
+
+export function useFireSimulationResult(id: string | null) {
+  return useQuery({
+    queryKey: ['fire', 'result', id] as const,
+    queryFn: () => api.get<{ result: import('./types').FireSimulationResult }>(`/fire/simulations/${id}/run`).then((r) => r.result),
+    enabled: !!id,
+  });
+}
+
+export function useFirePreview() {
+  return useMutation({
+    mutationFn: (data: import('./types').FireSimulationInput) =>
+      api.post<{ result: import('./types').FireSimulationResult }>('/fire/preview', data).then((r) => r.result),
+  });
+}
+
+export function useCreateFireSimulation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: import('./types').FireSimulationInput) =>
+      api.post<{ simulation: import('./types').FireSimulation }>('/fire/simulations', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fire'] }); },
+  });
+}
+
+export function useUpdateFireSimulation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
+      api.put<{ simulation: import('./types').FireSimulation }>(`/fire/simulations/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fire'] }); },
+  });
+}
+
+export function useDeleteFireSimulation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/fire/simulations/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fire'] }); },
+  });
+}
+
+// ============ REPORTS ============
+
+export function useReport(period: 'monthly' | 'quarterly' | 'yearly', start: string) {
+  return useQuery({
+    queryKey: ['reports', period, start],
+    queryFn: () => api.get<Record<string, unknown>>(`/reports?period=${period}&start=${start}`),
+    enabled: !!start,
   });
 }

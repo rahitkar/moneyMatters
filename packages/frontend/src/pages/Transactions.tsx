@@ -26,7 +26,7 @@ import {
   useRealizedGainsTotal,
   useExchangeRate,
 } from '../api/hooks';
-import { formatCurrency, formatNumber, formatDate } from '../lib/format';
+import { formatCurrency, formatNumber, formatDate, todayLocal } from '../lib/format';
 import CurrencyValue, { toInr } from '../components/CurrencyValue';
 import type { TransactionWithAsset, TransactionType, Asset, Position } from '../api/types';
 
@@ -289,7 +289,7 @@ function TransactionModal({
     quantity: '',
     price: '',
     fees: '',
-    transactionDate: new Date().toISOString().split('T')[0],
+    transactionDate: todayLocal(),
     notes: '',
   });
 
@@ -318,7 +318,7 @@ function TransactionModal({
         quantity: '',
         price: '',
         fees: '',
-        transactionDate: new Date().toISOString().split('T')[0],
+        transactionDate: todayLocal(),
         notes: '',
       });
     } catch (error) {

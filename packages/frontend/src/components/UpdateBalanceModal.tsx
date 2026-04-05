@@ -30,6 +30,8 @@ export default function UpdateBalanceModal({ isOpen, onClose, position }: Update
 
   const invested = position.totalCost;
   const currentVal = position.currentValue;
+  const ccy = position.currency || 'INR';
+  const ccyLabel = ccy === 'INR' ? 'INR' : ccy;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Update Balance — ${position.name}`} size="sm">
@@ -37,16 +39,16 @@ export default function UpdateBalanceModal({ isOpen, onClose, position }: Update
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <p className="text-surface-500">Total Deposited</p>
-            <p className="text-surface-200 font-medium">{formatCurrency(invested, 'INR')}</p>
+            <p className="text-surface-200 font-medium">{formatCurrency(invested, ccy)}</p>
           </div>
           <div>
             <p className="text-surface-500">Current Value</p>
-            <p className="text-surface-200 font-medium">{formatCurrency(currentVal, 'INR')}</p>
+            <p className="text-surface-200 font-medium">{formatCurrency(currentVal, ccy)}</p>
           </div>
         </div>
 
         <div>
-          <label className="label">Current Balance (INR)</label>
+          <label className="label">Current Balance ({ccyLabel})</label>
           <input
             type="number"
             value={balance}
@@ -63,7 +65,7 @@ export default function UpdateBalanceModal({ isOpen, onClose, position }: Update
               P&L will be{' '}
               <span className={parseFloat(balance) - invested >= 0 ? 'text-green-400' : 'text-red-400'}>
                 {parseFloat(balance) - invested >= 0 ? '+' : ''}
-                {formatCurrency(parseFloat(balance) - invested, 'INR')}
+                {formatCurrency(parseFloat(balance) - invested, ccy)}
               </span>
             </p>
           )}

@@ -8,6 +8,10 @@ import {
   TrendingUp,
   Tag,
   Upload,
+  Banknote,
+  Flame,
+  FileBarChart,
+  HelpCircle,
   RefreshCw,
   PanelLeftClose,
   PanelLeftOpen,
@@ -19,8 +23,12 @@ const navigation = [
   { name: 'Assets', href: '/assets', icon: Wallet },
   { name: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
   { name: 'Performance', href: '/performance', icon: TrendingUp },
+  { name: 'Cash Flow', href: '/cash-flow', icon: Banknote },
+  { name: 'FIRE', href: '/fire', icon: Flame },
+  { name: 'Reports', href: '/reports', icon: FileBarChart },
   { name: 'Tags', href: '/tags', icon: Tag },
   { name: 'Import', href: '/import', icon: Upload },
+  { name: 'Help', href: '/help', icon: HelpCircle },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {

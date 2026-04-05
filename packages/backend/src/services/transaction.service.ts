@@ -9,6 +9,7 @@ export interface CreateTransactionInput {
   quantity: number;
   price: number;
   fees?: number;
+  fundSourceId?: string;
   transactionDate: string;
   notes?: string;
 }
@@ -20,6 +21,11 @@ export interface TransactionWithAsset extends Transaction {
     assetClass: string;
     currency: string;
   };
+  fundSource?: {
+    id: string;
+    name: string;
+    symbol: string;
+  } | null;
 }
 
 export interface Position {
@@ -56,6 +62,7 @@ export const transactionService = {
   },
 
   async getAllWithAssets(): Promise<TransactionWithAsset[]> {
+    // Drizzle doesn't easily support self-joins with aliases, so do a two-step approach
     const results = await db
       .select({
         transaction: schema.transactions,
@@ -71,9 +78,21 @@ export const transactionService = {
       .orderBy(desc(schema.transactions.transactionDate))
       .all();
 
+    // Batch-load fund source names
+    const fundSourceIds = [...new Set(results.map((r) => r.transaction.fundSourceId).filter(Boolean))] as string[];
+    const fundSourceMap = new Map<string, { id: string; name: string; symbol: string }>();
+    if (fundSourceIds.length > 0) {
+      const fsAssets = await db.select({ id: schema.assets.id, name: schema.assets.name, symbol: schema.assets.symbol })
+        .from(schema.assets)
+        .where(sql`${schema.assets.id} IN (${sql.join(fundSourceIds.map((id) => sql`${id}`), sql`, `)})`)
+        .all();
+      for (const a of fsAssets) fundSourceMap.set(a.id, a);
+    }
+
     return results.map((r) => ({
       ...r.transaction,
       asset: { ...r.asset, currency: r.asset.currency ?? 'INR' },
+      fundSource: r.transaction.fundSourceId ? (fundSourceMap.get(r.transaction.fundSourceId) ?? null) : null,
     }));
   },
 
@@ -115,6 +134,7 @@ export const transactionService = {
       quantity: input.quantity,
       price: input.price,
       fees: input.fees ?? 0,
+      fundSourceId: input.fundSourceId ?? null,
       transactionDate: input.transactionDate,
       notes: input.notes ?? null,
       createdAt: now,
@@ -259,6 +279,26 @@ export const transactionService = {
       }
     }
 
+    // Fund-source adjustments: other transactions that reference this asset as fundSource
+    const fundSourceTx = await db
+      .select()
+      .from(schema.transactions)
+      .where(eq(schema.transactions.fundSourceId, assetId))
+      .all();
+
+    for (const tx of fundSourceTx) {
+      const amount = tx.quantity * tx.price + (tx.fees ?? 0);
+      if (tx.type === 'buy') {
+        // Money LEFT this account to fund a buy elsewhere
+        totalQuantity -= amount;
+        totalCost -= amount;
+      } else {
+        // Money CAME TO this account as proceeds from a sell elsewhere
+        totalQuantity += (tx.quantity * tx.price - (tx.fees ?? 0));
+        totalCost += (tx.quantity * tx.price - (tx.fees ?? 0));
+      }
+    }
+
     // Subtract sold quantities and calculate realized gains
     for (const gain of realizedGainsData) {
       const lot = lotRemaining.get(gain.buyTransactionId);
@@ -277,11 +317,14 @@ export const transactionService = {
       }
     }
 
-    const currentPrice = asset.currentPrice ?? 0;
-    const currentValue = totalQuantity * currentPrice;
-    const unrealizedGain = currentValue - positionCost;
-    const unrealizedGainPercent = positionCost > 0 ? (unrealizedGain / positionCost) * 100 : 0;
-    const averageCost = totalQuantity > 0 ? positionCost / totalQuantity : 0;
+    // For cash/wallet assets, position cost = quantity (1:1 value)
+    const isCashLike = ['cash', 'lended', 'fixed_deposit'].includes(asset.assetClass);
+    const currentPrice = isCashLike ? 1 : (asset.currentPrice ?? 0);
+    const effectiveQuantity = isCashLike ? totalQuantity : Math.max(0, totalQuantity);
+    const currentValue = effectiveQuantity * currentPrice;
+    const unrealizedGain = isCashLike ? 0 : (currentValue - positionCost);
+    const unrealizedGainPercent = positionCost > 0 && !isCashLike ? (unrealizedGain / positionCost) * 100 : 0;
+    const averageCost = effectiveQuantity > 0 ? positionCost / effectiveQuantity : 0;
 
     return {
       assetId,
@@ -289,9 +332,9 @@ export const transactionService = {
       name: asset.name,
       assetClass: asset.assetClass,
       currency: asset.currency || 'USD',
-      quantity: totalQuantity,
-      averageCost,
-      totalCost: positionCost,
+      quantity: effectiveQuantity,
+      averageCost: isCashLike ? 1 : averageCost,
+      totalCost: isCashLike ? effectiveQuantity : positionCost,
       currentPrice,
       currentValue,
       unrealizedGain,

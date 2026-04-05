@@ -10,6 +10,7 @@ const createTransactionSchema = z.object({
   quantity: z.number().positive(),
   price: z.number().positive(),
   fees: z.number().min(0).optional(),
+  fundSourceId: z.string().min(1).optional(),
   transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   notes: z.string().optional(),
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AssetClass } from '../api/types';
 import { useCreateAsset, useCreateTransaction } from '../api/hooks';
+import { todayLocal } from '../lib/format';
 
 const METAL_TYPES: { value: AssetClass; label: string; symbol: string }[] = [
   { value: 'gold_physical', label: 'Gold', symbol: 'GOLD' },
@@ -17,7 +18,7 @@ export default function PhysicalMetalForm({ onSuccess, onCancel }: PhysicalMetal
   const [name, setName] = useState('');
   const [weightGrams, setWeightGrams] = useState('');
   const [pricePerGram, setPricePerGram] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [purchaseDate, setPurchaseDate] = useState(todayLocal());
   const [notes, setNotes] = useState('');
 
   const createAsset = useCreateAsset();

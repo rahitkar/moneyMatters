@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Modal from './Modal';
-import { useCreateTransaction } from '../api/hooks';
+import { useCreateTransaction, useAssets } from '../api/hooks';
 import { clsx } from 'clsx';
+import { formatCurrency, todayLocal } from '../lib/format';
 import type { Position } from '../api/types';
 
 interface DepositWithdrawFormProps {
@@ -13,27 +14,58 @@ interface DepositWithdrawFormProps {
 export default function DepositWithdrawForm({ isOpen, onClose, position }: DepositWithdrawFormProps) {
   const [type, setType] = useState<'buy' | 'sell'>('buy');
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exchangeRate, setExchangeRate] = useState('');
+  const [date, setDate] = useState(todayLocal());
   const [notes, setNotes] = useState('');
+  const [fundSourceId, setFundSourceId] = useState('');
 
   const createTransaction = useCreateTransaction();
+  const { data: allAssets } = useAssets();
+  const cashAssets = allAssets?.filter((a) => a.assetClass === 'cash' && a.id !== position.assetId) ?? [];
+
+  const isForeignCurrency = position.currency !== 'INR';
+  const currencySymbol = position.currency === 'USD' ? '$' : position.currency;
+
+  const computedForeignAmount = useMemo(() => {
+    if (!isForeignCurrency) return null;
+    const inr = parseFloat(amount);
+    const rate = parseFloat(exchangeRate);
+    if (isNaN(inr) || isNaN(rate) || rate <= 0) return null;
+    return inr / rate;
+  }, [amount, exchangeRate, isForeignCurrency]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = parseFloat(amount);
     if (isNaN(val) || val <= 0) return;
 
+    let quantity: number;
+    let price: number;
+
+    if (isForeignCurrency) {
+      const rate = parseFloat(exchangeRate);
+      if (isNaN(rate) || rate <= 0) return;
+      quantity = val / rate;
+      price = rate;
+    } else {
+      quantity = val;
+      price = 1;
+    }
+
     try {
       await createTransaction.mutateAsync({
         assetId: position.assetId,
         type,
-        quantity: val,
-        price: 1,
+        quantity,
+        price,
+        fundSourceId: fundSourceId || undefined,
         transactionDate: date,
         notes: notes.trim() || undefined,
       });
       setAmount('');
+      setExchangeRate('');
       setNotes('');
+      setFundSourceId('');
       setType('buy');
       onClose();
     } catch {
@@ -87,6 +119,53 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
             autoFocus
           />
         </div>
+
+        {isForeignCurrency && (
+          <>
+            <div>
+              <label className="label">Exchange Rate (₹ per {currencySymbol}1)</label>
+              <input
+                type="number"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                placeholder="e.g. 85.50"
+                className="input"
+                min="0.0001"
+                step="0.0001"
+                required
+              />
+            </div>
+            {computedForeignAmount !== null && (
+              <div className="rounded-lg bg-surface-800/50 border border-surface-700 px-4 py-3 text-sm">
+                <span className="text-surface-400">
+                  {isDeposit ? 'You will receive' : 'You are withdrawing'}{' '}
+                </span>
+                <span className="text-brand-400 font-semibold tabular-nums">
+                  {formatCurrency(computedForeignAmount, position.currency)}
+                </span>
+                <span className="text-surface-500 ml-1">
+                  ({formatCurrency(parseFloat(amount), 'INR')} at {currencySymbol}1 = ₹{parseFloat(exchangeRate).toFixed(2)})
+                </span>
+              </div>
+            )}
+          </>
+        )}
+
+        {cashAssets.length > 0 && (
+          <div>
+            <label className="label">{isDeposit ? 'From Account' : 'To Account'}</label>
+            <select
+              value={fundSourceId}
+              onChange={(e) => setFundSourceId(e.target.value)}
+              className="input"
+            >
+              <option value="">— None —</option>
+              {cashAssets.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className="label">Date</label>

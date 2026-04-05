@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import { yahooFinanceProvider } from '../providers/yahoo-finance.provider.js';
 import type { Benchmark, BenchmarkPrice, TimeInterval } from '../db/schema.js';
+import { todayLocal, dateToLocal } from '../lib/date.js';
 
 export interface BenchmarkWithLatestPrice extends Benchmark {
   latestPrice: number | null;
@@ -141,7 +142,7 @@ export const benchmarkService = {
           id: nanoid(),
           benchmarkId,
           price: p.close,
-          recordedDate: p.date.toISOString().split('T')[0],
+          recordedDate: dateToLocal(p.date),
           createdAt: now,
         }))
         .filter((r) => r.price > 0 && !existingDates.has(r.recordedDate));
@@ -185,7 +186,7 @@ export const benchmarkService = {
     overrideEndStr?: string
   ): Promise<{ date: string; price: number }[]> {
     const startDate = getStartDate(interval, overrideStartStr);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
 
     const conditions = [
       eq(schema.benchmarkPrices.benchmarkId, benchmarkId),
@@ -229,7 +230,7 @@ export const benchmarkService = {
       .limit(1)
       .then((r) => r[0]);
 
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const yesterday = dateToLocal(new Date(Date.now() - 86400000));
     const needsRefresh = !latestStored || latestStored.date < yesterday;
 
     if (needsRefresh) {
@@ -249,7 +250,7 @@ export const benchmarkService = {
       .limit(1)
       .then((r) => r[0]);
 
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
     if (!earliestStored || earliestStored.date > startDateStr) {
       // Need historical data before what we have
       const fetchEnd = earliestStored ? new Date(earliestStored.date) : new Date();

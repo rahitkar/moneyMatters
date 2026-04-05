@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import Modal from './Modal';
-import { useCreateTransaction } from '../api/hooks';
+import { useCreateTransaction, useAssets } from '../api/hooks';
 import { clsx } from 'clsx';
-import { formatCurrency } from '../lib/format';
+import { formatCurrency, todayLocal } from '../lib/format';
 import type { Position } from '../api/types';
 
 interface MetalTransactionFormProps {
@@ -15,10 +15,13 @@ export default function MetalTransactionForm({ isOpen, onClose, position }: Meta
   const [type, setType] = useState<'buy' | 'sell'>('buy');
   const [weightGrams, setWeightGrams] = useState('');
   const [pricePerGram, setPricePerGram] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocal());
   const [notes, setNotes] = useState('');
+  const [fundSourceId, setFundSourceId] = useState('');
 
   const createTransaction = useCreateTransaction();
+  const { data: allAssets } = useAssets();
+  const cashAssets = allAssets?.filter((a) => a.assetClass === 'cash') ?? [];
 
   const grams = parseFloat(weightGrams) || 0;
   const ppg = parseFloat(pricePerGram) || 0;
@@ -35,6 +38,7 @@ export default function MetalTransactionForm({ isOpen, onClose, position }: Meta
         type,
         quantity: grams,
         price: ppg,
+        fundSourceId: fundSourceId || undefined,
         transactionDate: date,
         notes: notes.trim() || undefined,
       });
@@ -145,6 +149,18 @@ export default function MetalTransactionForm({ isOpen, onClose, position }: Meta
             required
           />
         </div>
+
+        {cashAssets.length > 0 && (
+          <div>
+            <label className="label">{isBuy ? 'Paid From' : 'Proceeds To'}</label>
+            <select value={fundSourceId} onChange={(e) => setFundSourceId(e.target.value)} className="input">
+              <option value="">— None —</option>
+              {cashAssets.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className="label">Notes (optional)</label>

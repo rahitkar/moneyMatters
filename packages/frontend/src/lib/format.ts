@@ -1,3 +1,10 @@
+const USER_TZ = 'Asia/Kolkata';
+
+/** Returns today's date as YYYY-MM-DD in the user's timezone (IST). */
+export function todayLocal(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: USER_TZ }).format(new Date());
+}
+
 export function formatCurrency(
   value: number,
   currency = 'USD',

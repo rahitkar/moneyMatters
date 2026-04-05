@@ -13,7 +13,7 @@ import {
 import { clsx } from 'clsx';
 import Papa from 'papaparse';
 import Card from '../components/Card';
-import { useImportHoldings, useImportTradebook, type TradebookImportResult } from '../api/hooks';
+import { useImportHoldings, useImportTradebook, useAssets, type TradebookImportResult } from '../api/hooks';
 import type { AssetClass } from '../api/types';
 
 // CSV template content
@@ -618,8 +618,11 @@ function HoldingsImport() {
     skipped: number;
     errors: { row: number; error: string }[];
   } | null>(null);
+  const [selectedFundSource, setSelectedFundSource] = useState('');
 
   const importHoldings = useImportHoldings();
+  const { data: allAssets } = useAssets();
+  const cashAssets = allAssets?.filter((a) => a.assetClass === 'cash') ?? [];
 
   const handleFileUpload = useCallback((file: File) => {
     Papa.parse(file, {
@@ -730,6 +733,7 @@ function HoldingsImport() {
       const result = await importHoldings.mutateAsync({
         rows: parsedRows,
         skipExisting: false,
+        fundSourceId: selectedFundSource || undefined,
       });
       setImportResult(result.results);
       setStep('complete');
@@ -981,6 +985,18 @@ function HoldingsImport() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                {cashAssets.length > 0 && (
+                  <select
+                    value={selectedFundSource}
+                    onChange={(e) => setSelectedFundSource(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="">Fund Source (optional)</option>
+                    {cashAssets.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                )}
                 <button onClick={reset} className="btn btn-secondary">
                   Start Over
                 </button>

@@ -15,7 +15,7 @@ import {
   useDeleteAsset,
   useExchangeRate,
 } from '../api/hooks';
-import { formatNumber, formatPercent, formatCurrency } from '../lib/format';
+import { formatNumber, formatPercent, formatCurrency, todayLocal } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { HoldingWithValue, Asset, AssetClass } from '../api/types';
 
@@ -327,8 +327,8 @@ function HoldingModal({
     quantity: holding?.quantity.toString() || '',
     purchasePrice: holding?.purchasePrice.toString() || '',
     purchaseDate: holding?.id
-      ? new Date().toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0],
+      ? todayLocal()
+      : todayLocal(),
     notes: '',
   });
 
@@ -339,7 +339,7 @@ function HoldingModal({
         assetId: holding.assetId,
         quantity: holding.quantity.toString(),
         purchasePrice: holding.purchasePrice.toString(),
-        purchaseDate: new Date().toISOString().split('T')[0],
+        purchaseDate: todayLocal(),
         notes: '',
       });
     }

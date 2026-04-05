@@ -56,23 +56,23 @@ export default function StatCard({
   const v: Variant = variant ?? (isPositive === undefined ? 'neutral' : isPositive ? 'positive' : 'negative');
 
   return (
-    <Card className={className}>
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <p className="stat-label">{label}</p>
-          <p className={clsx('stat-value', valueColorMap[v])}>
-            {value}
-          </p>
-          {usdSubValue && (
-            <p className={clsx('text-[10px] mt-0.5', subValueColorMap[v])}>
-              {usdSubValue}
-            </p>
-          )}
-          {subValue && <p className="text-sm text-surface-500 mt-1">{subValue}</p>}
-        </div>
-        <div className={clsx('p-3 rounded-xl shrink-0', bgMap[v])}>
+    <Card className={clsx('relative', className)}>
+      <div className="absolute top-2.5 right-2.5">
+        <div className={clsx('p-2 rounded-xl', bgMap[v])}>
           <Icon className={clsx('w-5 h-5', iconColorMap[v])} />
         </div>
+      </div>
+      <div className="text-center">
+        <p className="stat-label">{label}</p>
+        <p className={clsx('stat-value', valueColorMap[v])}>
+          {value}
+        </p>
+        {usdSubValue && (
+          <p className={clsx('text-[10px] mt-0.5', subValueColorMap[v])}>
+            {usdSubValue}
+          </p>
+        )}
+        {subValue && <p className="text-xs text-surface-500 mt-1">{subValue}</p>}
       </div>
     </Card>
   );

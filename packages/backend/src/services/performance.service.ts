@@ -5,6 +5,7 @@ import { transactionService } from './transaction.service.js';
 import { benchmarkService, type BenchmarkPerformance } from './benchmark.service.js';
 import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 import type { TimeInterval, AssetClass, PortfolioSnapshot } from '../db/schema.js';
+import { todayLocal, dateToLocal } from '../lib/date.js';
 
 const PHYSICAL_METAL_CLASSES = new Set<string>(['gold_physical', 'silver_physical']);
 const METAL_SELL_FACTOR = 0.95;
@@ -158,11 +159,11 @@ function generateSampleDates(startStr: string, endStr: string, interval: TimeInt
 
   const current = new Date(start);
   while (current <= end) {
-    dates.push(current.toISOString().split('T')[0]);
+    dates.push(dateToLocal(current));
     current.setDate(current.getDate() + stepDays);
   }
 
-  const endDateStr = end.toISOString().split('T')[0];
+  const endDateStr = dateToLocal(end);
   if (dates.length === 0 || dates[dates.length - 1] !== endDateStr) {
     dates.push(endDateStr);
   }
@@ -241,12 +242,12 @@ export const performanceService = {
     }
 
     for (const ph of priceHistoryRecords) {
-      const dateStr = new Date(ph.recordedAt.getTime()).toISOString().split('T')[0];
+      const dateStr = dateToLocal(new Date(ph.recordedAt.getTime()));
       if (!priceTimeline.has(ph.assetId)) priceTimeline.set(ph.assetId, []);
       priceTimeline.get(ph.assetId)!.push({ date: dateStr, price: ph.price });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayLocal();
     const isLiveEnd = endDateStr >= todayStr;
     if (isLiveEnd) {
       for (const [assetId, price] of currentPrices) {
@@ -443,19 +444,19 @@ export const performanceService = {
     customEnd?: string
   ): Promise<PortfolioPerformance> {
     const endDate = customEnd ? new Date(customEnd) : new Date();
-    const endDateStr = endDate.toISOString().split('T')[0];
+    const endDateStr = dateToLocal(endDate);
 
     let startDate: Date | null = customStart ? new Date(customStart) : getStartDate(interval);
     if (!startDate) {
       const firstTxDate = await getFirstTransactionDate(allowedAssetIds);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
 
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayLocal();
     const isLive = endDateStr >= todayStr;
 
     let positions = await transactionService.getAllPositions();
@@ -620,7 +621,7 @@ export const performanceService = {
       const firstTxDate = await getFirstTransactionDate();
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
 
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
@@ -788,7 +789,7 @@ export const performanceService = {
       const firstTxDate = await getFirstTransactionDate();
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
 
     let startValue = 0;
     let endValue = 0;
@@ -832,7 +833,7 @@ export const performanceService = {
 
   // Take a daily snapshot of portfolio value (all values in INR)
   async takeSnapshot(): Promise<PortfolioSnapshot | null> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayLocal();
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
@@ -891,7 +892,7 @@ export const performanceService = {
       const firstTxDate = await getFirstTransactionDate();
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = dateToLocal(startDate);
 
     return db
       .select()
