@@ -328,7 +328,7 @@ export default function Dashboard() {
           value={formatCurrency(summary.totalCost, 'INR')}
           usdSubValue={usdToInr ? formatCurrency(summary.totalCost / usdToInr, 'USD') : undefined}
           icon={Wallet}
-          variant="neutral"
+          variant="brand"
           className="animate-slide-up animate-delay-100"
         />
         <StatCard

@@ -119,14 +119,14 @@ export default function Transactions() {
           label="Transactions"
           value={String(stats.count)}
           icon={Activity}
-          variant="neutral"
+          variant="accent"
         />
         <StatCard
           label="Total Invested"
           value={formatCurrency(stats.totalBuyValue, 'INR')}
           usdSubValue={usdToInr ? formatCurrency(stats.totalBuyValue / usdToInr, 'USD') : undefined}
           icon={Wallet}
-          variant="neutral"
+          variant="brand"
         />
         <StatCard
           label="Realized P&L"

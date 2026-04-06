@@ -208,7 +208,7 @@ export default function Reports() {
                 label="Invested"
                 value={formatCurrency(portfolio.totalCost, 'INR')}
                 icon={DollarSign}
-                variant="neutral"
+                variant="brand"
               />
               <StatCard
                 label="Total P&L"

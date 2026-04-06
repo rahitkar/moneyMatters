@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import Card from './Card';
 
-type Variant = 'brand' | 'positive' | 'negative' | 'neutral';
+type Variant = 'brand' | 'positive' | 'negative' | 'neutral' | 'accent';
 
 interface StatCardProps {
   label: string;
@@ -20,6 +20,7 @@ const bgMap: Record<Variant, string> = {
   positive: 'bg-green-500/20',
   negative: 'bg-red-500/20',
   neutral: 'bg-surface-700/50',
+  accent: 'bg-cyan-500/20',
 };
 
 const iconColorMap: Record<Variant, string> = {
@@ -27,6 +28,7 @@ const iconColorMap: Record<Variant, string> = {
   positive: 'text-green-400',
   negative: 'text-red-400',
   neutral: 'text-surface-400',
+  accent: 'text-cyan-400',
 };
 
 const valueColorMap: Record<Variant, string> = {
@@ -34,6 +36,7 @@ const valueColorMap: Record<Variant, string> = {
   positive: 'text-green-400',
   negative: 'text-red-400',
   neutral: 'text-surface-100',
+  accent: 'text-surface-100',
 };
 
 const subValueColorMap: Record<Variant, string> = {
@@ -41,6 +44,7 @@ const subValueColorMap: Record<Variant, string> = {
   positive: 'text-green-400/60',
   negative: 'text-red-400/60',
   neutral: 'text-surface-500',
+  accent: 'text-surface-500',
 };
 
 export default function StatCard({

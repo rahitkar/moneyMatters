@@ -701,7 +701,7 @@ export default function Assets() {
             value={formatCurrency(totals.invested, 'INR')}
             usdSubValue={totals.investedUsd !== null ? formatCurrency(totals.investedUsd, 'USD') : undefined}
             icon={Wallet}
-            variant="neutral"
+            variant="brand"
           />
           <StatCard
             label="Total P&L"
