@@ -362,28 +362,47 @@ export default function CashFlow() {
           {/* Bank Waterfall */}
           <Card padding="sm">
             <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Bank Account Flow</h3>
-            <div className="space-y-1.5 text-sm">
-              {[
-                { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
-                { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
-                { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
-                { label: 'Credit Card Bill', value: summary.waterfall.ccBillTotal, color: 'text-red-400', sign: '−' },
-                { label: 'Investment Transfers', value: summary.totals.totalInvested, color: 'text-blue-400', sign: '−' },
-              ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between py-1 border-b border-surface-800 last:border-b-0">
-                  <span className="text-surface-400">{row.sign ? `${row.sign} ` : ''}{row.label}</span>
-                  <span className={clsx('font-mono font-medium', row.color)}>
-                    {row.value != null ? formatCurrency(row.value, 'INR') : '—'}
-                  </span>
+            {(() => {
+              const ob = summary.waterfall.openingBalance ?? 0;
+              const currentBankBalance = ob + summary.waterfall.totalIncome - summary.totals.totalInvested - summary.waterfall.cashUpiExpenses;
+              return (
+                <div className="space-y-1.5 text-sm">
+                  {[
+                    { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
+                    { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
+                    { label: 'Investment Transfers', value: summary.totals.totalInvested, color: 'text-blue-400', sign: '−' },
+                    { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
+                  ].map((row) => (
+                    <div key={row.label} className="flex items-center justify-between py-1 border-b border-surface-800 last:border-b-0">
+                      <span className="text-surface-400">{row.sign ? `${row.sign} ` : ''}{row.label}</span>
+                      <span className={clsx('font-mono font-medium', row.color)}>
+                        {row.value != null ? formatCurrency(row.value, 'INR') : '—'}
+                      </span>
+                    </div>
+                  ))}
+                  {summary.waterfall.openingBalance != null && (
+                    <div className="flex items-center justify-between py-2 border-t-2 border-brand-500/30 bg-brand-500/5 rounded-lg px-2 -mx-1 mt-1">
+                      <span className="text-brand-400 font-semibold text-xs uppercase tracking-wide">Current Bank Balance</span>
+                      <span className={clsx('font-mono font-bold text-base', currentBankBalance >= 0 ? 'text-brand-400' : 'text-red-400')}>
+                        {formatCurrency(currentBankBalance, 'INR')}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between py-1 border-b border-surface-800">
+                    <span className="text-surface-400">− Credit Card Spends</span>
+                    <span className="font-mono font-medium text-red-400">
+                      {summary.waterfall.ccBillTotal != null ? formatCurrency(summary.waterfall.ccBillTotal, 'INR') : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-1.5 border-t-2 border-surface-600 mt-1">
+                    <span className="text-surface-100 font-semibold">Savings (Closing Balance)</span>
+                    <span className={clsx('font-mono font-bold', summary.waterfall.savings >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {formatCurrency(summary.waterfall.savings, 'INR')}
+                    </span>
+                  </div>
                 </div>
-              ))}
-              <div className="flex items-center justify-between py-1.5 border-t-2 border-surface-600 mt-1">
-                <span className="text-surface-100 font-semibold">Savings (Closing Balance)</span>
-                <span className={clsx('font-mono font-bold', summary.waterfall.savings >= 0 ? 'text-green-400' : 'text-red-400')}>
-                  {formatCurrency(summary.waterfall.savings, 'INR')}
-                </span>
-              </div>
-            </div>
+              );
+            })()}
           </Card>
 
           {/* Stat Cards */}
