@@ -1,4 +1,4 @@
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { Asset, NewAsset, AssetClass, Provider } from '../db/schema.js';
@@ -153,20 +153,59 @@ export const assetService = {
     return this.getById(id);
   },
 
-  async updatePrice(id: string, price: number): Promise<void> {
+  async updatePrice(id: string, price: number, marketTime?: Date): Promise<void> {
     const now = new Date();
+    // Yahoo returns regularMarketTime for US/IN equities & ETFs; invalid/missing → fetch time
+    const quoteTime =
+      marketTime != null && !Number.isNaN(marketTime.getTime()) ? marketTime : undefined;
+
     await db
       .update(schema.assets)
       .set({ currentPrice: price, lastUpdated: now })
       .where(eq(schema.assets.id, id));
 
-    // Record price history
-    await db.insert(schema.priceHistory).values({
-      id: nanoid(),
-      assetId: id,
-      price,
-      recordedAt: now,
-    });
+    const lastEntry = await db
+      .select({
+        id: schema.priceHistory.id,
+        price: schema.priceHistory.price,
+        recordedAt: schema.priceHistory.recordedAt,
+      })
+      .from(schema.priceHistory)
+      .where(eq(schema.priceHistory.assetId, id))
+      .orderBy(desc(schema.priceHistory.recordedAt))
+      .limit(1)
+      .then((r) => r[0] ?? null);
+
+    const ts = quoteTime ?? now;
+    const round4 = (v: number) => Math.round(v * 10000) / 10000;
+
+    if (quoteTime && lastEntry) {
+      const lastTs = lastEntry.recordedAt instanceof Date
+        ? lastEntry.recordedAt.getTime()
+        : Number(lastEntry.recordedAt) * 1000;
+
+      // Same market session (within 1 min) → skip
+      if (Math.abs(ts.getTime() - lastTs) < 60_000) return;
+
+      // Market time is BEFORE the last recorded_at → previous entry was a phantom
+      // (fetched when market was closed). Correct its timestamp.
+      if (ts.getTime() < lastTs) {
+        await db
+          .update(schema.priceHistory)
+          .set({ recordedAt: ts, price })
+          .where(eq(schema.priceHistory.id, lastEntry.id));
+        return;
+      }
+    }
+
+    if (!lastEntry || round4(lastEntry.price) !== round4(price)) {
+      await db.insert(schema.priceHistory).values({
+        id: nanoid(),
+        assetId: id,
+        price,
+        recordedAt: ts,
+      });
+    }
   },
 
   async delete(id: string): Promise<boolean> {

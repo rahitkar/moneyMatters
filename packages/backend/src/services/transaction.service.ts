@@ -42,6 +42,7 @@ export interface Position {
   unrealizedGain: number;
   unrealizedGainPercent: number;
   realizedGain: number;
+  lastActivityDate: string | null;
 }
 
 export interface LotInfo {
@@ -326,6 +327,27 @@ export const transactionService = {
     const unrealizedGainPercent = positionCost > 0 && !isCashLike ? (unrealizedGain / positionCost) * 100 : 0;
     const averageCost = effectiveQuantity > 0 ? positionCost / effectiveQuantity : 0;
 
+    let lastActivityDate: string | null = null;
+    if (asset.provider === 'manual') {
+      const lastTx = await db
+        .select({ d: sql<string>`MAX(transaction_date)` })
+        .from(schema.transactions)
+        .where(eq(schema.transactions.assetId, assetId))
+        .then((r) => r[0]?.d ?? null);
+      lastActivityDate = lastTx;
+    } else {
+      const lastPrice = await db
+        .select({ ts: sql<number>`MAX(recorded_at)` })
+        .from(schema.priceHistory)
+        .where(eq(schema.priceHistory.assetId, assetId))
+        .then((r) => r[0]?.ts ?? null);
+      if (lastPrice) {
+        lastActivityDate = new Date(lastPrice * 1000).toISOString();
+      } else if (asset.lastUpdated) {
+        lastActivityDate = new Date(asset.lastUpdated.getTime()).toISOString();
+      }
+    }
+
     return {
       assetId,
       symbol: asset.symbol,
@@ -340,6 +362,7 @@ export const transactionService = {
       unrealizedGain,
       unrealizedGainPercent,
       realizedGain: totalRealizedGain,
+      lastActivityDate,
     };
   },
 

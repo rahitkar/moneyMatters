@@ -187,6 +187,7 @@ export interface Position {
   unrealizedGain: number;
   unrealizedGainPercent: number;
   realizedGain: number;
+  lastActivityDate: string | null;
 }
 
 export interface LotInfo {

@@ -196,15 +196,18 @@ export const marketDataService = {
       byProvider.set(asset.provider, list);
     }
 
-    // Update Yahoo Finance assets
-    const yahooAssets = byProvider.get('yahoo_finance') || [];
+    // Indian MFs are fetched via mfapi.in later, even if provider is yahoo_finance
+    const isMfClass = (ac: string) => MANUAL_MF_CLASSES.includes(ac as AssetClass);
+
+    // Update Yahoo Finance assets (exclude Indian MFs — handled separately via mfapi.in)
+    const yahooAssets = (byProvider.get('yahoo_finance') || []).filter((a) => !isMfClass(a.assetClass));
     if (yahooAssets.length > 0) {
       const symbols = [...new Set(yahooAssets.map((a) => a.symbol))];
       const quotes = await yahooFinanceProvider.getQuotes(symbols);
       for (const asset of yahooAssets) {
         const quote = quotes.get(asset.symbol);
         if (quote) {
-          await assetService.updatePrice(asset.id, quote.price);
+          await assetService.updatePrice(asset.id, quote.price, quote.regularMarketTime);
           updated++;
         } else {
           failed++;
@@ -278,12 +281,8 @@ export const marketDataService = {
       }
     }
 
-    // Indian mutual funds (Zerodha imports): provider is manual — fetch NAV from mfapi.in
-    const mfManual = assets.filter(
-      (a) =>
-        a.provider === 'manual' &&
-        MANUAL_MF_CLASSES.includes(a.assetClass as AssetClass)
-    );
+    // Indian mutual funds: always fetch via mfapi.in regardless of provider
+    const mfManual = assets.filter((a) => isMfClass(a.assetClass));
     for (const asset of mfManual) {
       try {
         const nav = await indiaMfNavProvider.fetchLatestNav({

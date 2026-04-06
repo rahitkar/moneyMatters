@@ -9,6 +9,7 @@ export interface QuoteResult {
   changePercent: number;
   marketCap?: number;
   volume?: number;
+  regularMarketTime?: Date;
 }
 
 export interface SearchResult {
@@ -47,6 +48,7 @@ export const yahooFinanceProvider = {
         changePercent: quote.regularMarketChangePercent || 0,
         marketCap: quote.marketCap,
         volume: quote.regularMarketVolume,
+        regularMarketTime: quote.regularMarketTime,
       };
     } catch (error) {
       console.error(`Yahoo Finance quote error for ${symbol}:`, error);
