@@ -19,16 +19,16 @@ import {
 import { useRefreshPrices } from '../api/hooks';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Assets', href: '/assets', icon: Wallet },
-  { name: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
-  { name: 'Performance', href: '/performance', icon: TrendingUp },
-  { name: 'Cash Flow', href: '/cash-flow', icon: Banknote },
-  { name: 'FIRE', href: '/fire', icon: Flame },
-  { name: 'Reports', href: '/reports', icon: FileBarChart },
-  { name: 'Tags', href: '/tags', icon: Tag },
-  { name: 'Import', href: '/import', icon: Upload },
-  { name: 'Help', href: '/help', icon: HelpCircle },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, iconColor: 'text-blue-400' },
+  { name: 'Assets', href: '/assets', icon: Wallet, iconColor: 'text-emerald-400' },
+  { name: 'Transactions', href: '/transactions', icon: ArrowLeftRight, iconColor: 'text-cyan-400' },
+  { name: 'Performance', href: '/performance', icon: TrendingUp, iconColor: 'text-green-400' },
+  { name: 'Cash Flow', href: '/cash-flow', icon: Banknote, iconColor: 'text-amber-400' },
+  { name: 'FIRE', href: '/fire', icon: Flame, iconColor: 'text-orange-400' },
+  { name: 'Reports', href: '/reports', icon: FileBarChart, iconColor: 'text-purple-400' },
+  { name: 'Tags', href: '/tags', icon: Tag, iconColor: 'text-pink-400' },
+  { name: 'Import', href: '/import', icon: Upload, iconColor: 'text-teal-400' },
+  { name: 'Help', href: '/help', icon: HelpCircle, iconColor: 'text-surface-500' },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -81,7 +81,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/50'
                   )}
                 >
-                  <item.icon className="w-5 h-5 shrink-0" />
+                  <item.icon className={clsx('w-5 h-5 shrink-0', isActive ? 'text-brand-400' : item.iconColor)} />
                   {!collapsed && <span>{item.name}</span>}
                 </Link>
               );
