@@ -20,37 +20,19 @@ function convertToInr(value: number, currency: string, usdToInr: number | null):
 }
 
 export interface DayChangeResult {
-  dayChanges: Record<string, { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number }>;
+  dayChanges: Record<string, { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number; previousValueInr: number }>;
   totalDayChange: number;
   totalDayChangePercent: number;
 }
 
 export async function getDayChanges(): Promise<DayChangeResult> {
-  const latestRow = sqlite.prepare(
-    `SELECT MAX(recorded_at) as max_at FROM price_history`
-  ).get() as { max_at: number | null } | undefined;
-
-  const latestTs = latestRow?.max_at;
-  if (!latestTs) return { dayChanges: {}, totalDayChange: 0, totalDayChangePercent: 0 };
-
-  const latestDate = new Date(latestTs * 1000);
-  const latestISTDate = latestDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-  const cutoff = new Date(latestISTDate + 'T00:00:00+05:30');
-
-  const prevRows = sqlite.prepare(`
-    SELECT ph.asset_id, ph.price
-    FROM price_history ph
-    INNER JOIN (
-      SELECT asset_id, MAX(recorded_at) as max_at
-      FROM price_history
-      WHERE recorded_at < ?
-      GROUP BY asset_id
-    ) latest ON ph.asset_id = latest.asset_id AND ph.recorded_at = latest.max_at
-  `).all(Math.floor(cutoff.getTime() / 1000)) as { asset_id: string; price: number }[];
-
-  const prevMap = new Map<string, number>();
-  for (const row of prevRows) {
-    prevMap.set(row.asset_id, row.price);
+  // Build a map of asset_id → previous_close from the assets table (set by Yahoo on refresh)
+  const assetPrevRows = sqlite.prepare(
+    `SELECT id, previous_close FROM assets WHERE previous_close IS NOT NULL`
+  ).all() as { id: string; previous_close: number }[];
+  const prevCloseMap = new Map<string, number>();
+  for (const row of assetPrevRows) {
+    prevCloseMap.set(row.id, row.previous_close);
   }
 
   const usdToInr = await getUsdToInr();
@@ -60,10 +42,10 @@ export async function getDayChanges(): Promise<DayChangeResult> {
   let totalPreviousValue = 0;
 
   for (const p of positions) {
-    const prev = prevMap.get(p.assetId);
-    if (prev != null && p.currentPrice != null) {
+    const prev = prevCloseMap.get(p.assetId);
+    if (prev != null && prev > 0 && p.currentPrice != null) {
       const change = p.currentPrice - prev;
-      const changePct = prev > 0 ? (change / prev) * 100 : 0;
+      const changePct = (change / prev) * 100;
       const metalAdj = PHYSICAL_METAL_CLASSES.has(p.assetClass) ? METAL_SELL_FACTOR : 1;
       const cur = p.currency || 'INR';
       const changeValueInr = convertToInr(change * p.quantity, cur, usdToInr) * metalAdj;
@@ -73,6 +55,7 @@ export async function getDayChanges(): Promise<DayChangeResult> {
         dayChange: change,
         dayChangePercent: changePct,
         dayChangeValue: changeValueInr,
+        previousValueInr: prevValueInr,
       };
       totalDayChange += changeValueInr;
       totalPreviousValue += prevValueInr;

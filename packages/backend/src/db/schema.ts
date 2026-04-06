@@ -55,6 +55,7 @@ export const assets = sqliteTable('assets', {
   assetClass: text('asset_class').notNull().$type<AssetClass>(),
   provider: text('provider').notNull().$type<Provider>(),
   currentPrice: real('current_price'),
+  previousClose: real('previous_close'),
   currency: text('currency').default('USD'),
   lastUpdated: integer('last_updated', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

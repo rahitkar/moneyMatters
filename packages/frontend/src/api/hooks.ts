@@ -61,6 +61,7 @@ export const queryKeys = {
   benchmarks: ['benchmarks'] as const,
   benchmarkPerformance: (symbol: string, interval: TimeInterval) =>
     ['benchmarks', symbol, 'performance', interval] as const,
+  exchangeRate: (from: string, to: string) => ['exchange-rate', from, to] as const,
 };
 
 // Assets
@@ -342,13 +343,13 @@ export function useWorstPerformers(limit = 5) {
 // Exchange Rates
 export function useExchangeRate(from: string, to: string) {
   return useQuery({
-    queryKey: ['exchange-rate', from, to] as const,
+    queryKey: queryKeys.exchangeRate(from, to),
     queryFn: () =>
       api.get<{ rate: { from: string; to: string; rate: number; date: string } }>(
         `/market-data/rate/${from}/${to}`
       ).then((r) => r.rate),
     enabled: from !== to,
-    staleTime: 1000 * 60 * 30, // 30 minutes
+    staleTime: Infinity,
     retry: 1,
   });
 }
@@ -373,6 +374,8 @@ export function useRefreshPrices() {
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolioAllocation });
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolioHoldings });
+      queryClient.invalidateQueries({ queryKey: queryKeys.exchangeRate('USD', 'INR') });
+      queryClient.invalidateQueries({ queryKey: ['day-changes'] });
     },
   });
 }
@@ -463,7 +466,7 @@ export function usePositions() {
   });
 }
 
-export type DayChangeMap = Record<string, { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number }>;
+export type DayChangeMap = Record<string, { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number; previousValueInr: number }>;
 export interface DayChangesResponse { dayChanges: DayChangeMap; totalDayChange: number; totalDayChangePercent: number }
 
 export function useDayChanges() {

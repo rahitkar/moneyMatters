@@ -184,6 +184,9 @@ export const marketDataService = {
   },
 
   async updateAllPrices(): Promise<{ updated: number; failed: number }> {
+    exchangeRateProvider.invalidateRate('USD', 'INR');
+    await exchangeRateProvider.getRate('USD', 'INR');
+
     const assets = await assetService.getAll();
     let updated = 0;
     let failed = 0;
@@ -207,7 +210,7 @@ export const marketDataService = {
       for (const asset of yahooAssets) {
         const quote = quotes.get(asset.symbol);
         if (quote) {
-          await assetService.updatePrice(asset.id, quote.price, quote.regularMarketTime);
+          await assetService.updatePrice(asset.id, quote.price, quote.regularMarketTime, quote.previousClose);
           updated++;
         } else {
           failed++;
@@ -281,8 +284,12 @@ export const marketDataService = {
       }
     }
 
-    // Indian mutual funds: always fetch via mfapi.in regardless of provider
+    // Indian mutual funds: NAV from mfapi.in, previousClose from Yahoo
     const mfManual = assets.filter((a) => isMfClass(a.assetClass));
+    const mfSymbols = [...new Set(mfManual.map((a) => a.symbol).filter(Boolean))];
+    const mfYahooQuotes = mfSymbols.length > 0
+      ? await yahooFinanceProvider.getQuotes(mfSymbols)
+      : new Map<string, import('../providers/yahoo-finance.provider.js').QuoteResult>();
     for (const asset of mfManual) {
       try {
         const nav = await indiaMfNavProvider.fetchLatestNav({
@@ -291,7 +298,8 @@ export const marketDataService = {
           symbol: asset.symbol,
         });
         if (nav !== null) {
-          await assetService.updatePrice(asset.id, nav);
+          const yahooQuote = mfYahooQuotes.get(asset.symbol);
+          await assetService.updatePrice(asset.id, nav, undefined, yahooQuote?.previousClose);
           updated++;
         } else {
           failed++;

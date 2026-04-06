@@ -574,6 +574,7 @@ export default function Assets() {
         pnlUsd: rate ? summary.totalGain / rate : null,
         totalDayChange,
         totalDayChangePct,
+        totalDayChangeUsd: rate ? totalDayChange / rate : null,
       };
     }
 
@@ -590,15 +591,20 @@ export default function Assets() {
     const pnlUsd = usdToInr ? pnl / usdToInr : null;
 
     let totalDayChange = 0;
+    let totalPreviousValue = 0;
     if (dayChanges) {
       for (const p of filteredPositions) {
         const dc = dayChanges[p.assetId];
-        if (dc) totalDayChange += dc.dayChangeValue;
+        if (dc) {
+          totalDayChange += dc.dayChangeValue;
+          totalPreviousValue += dc.previousValueInr;
+        }
       }
     }
-    const totalDayChangePct = current > 0 ? (totalDayChange / (current - totalDayChange)) * 100 : 0;
+    const totalDayChangePct = totalPreviousValue > 0 ? (totalDayChange / totalPreviousValue) * 100 : 0;
 
-    return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd, totalDayChange, totalDayChangePct };
+    const totalDayChangeUsd = usdToInr ? totalDayChange / usdToInr : null;
+    return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd, totalDayChange, totalDayChangePct, totalDayChangeUsd };
   }, [filteredPositions, usdToInr, isFiltered, summary, dayChanges, dayChangesResp]);
 
   const toggleAssetSelection = useCallback((assetId: string) => {
@@ -713,6 +719,7 @@ export default function Assets() {
           <StatCard
             label="Day Change"
             value={`${totals.totalDayChange >= 0 ? '+' : ''}${formatCurrency(totals.totalDayChange, 'INR')}`}
+            usdSubValue={totals.totalDayChangeUsd !== null ? `${totals.totalDayChange >= 0 ? '+' : ''}${formatCurrency(totals.totalDayChangeUsd, 'USD')}` : undefined}
             subValue={`${totals.totalDayChangePct >= 0 ? '+' : ''}${formatPercent(totals.totalDayChangePct)}`}
             icon={totals.totalDayChange >= 0 ? ArrowUpRight : ArrowDownRight}
             isPositive={totals.totalDayChange >= 0}
@@ -1359,7 +1366,7 @@ function PositionRow({
 }: {
   position: Position;
   usdToInr: number | null;
-  dayChange: { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number } | null;
+  dayChange: { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number; previousValueInr: number } | null;
   totalValue: number;
   isExpanded: boolean;
   bulkSelectMode: boolean;

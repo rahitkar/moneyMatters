@@ -153,15 +153,18 @@ export const assetService = {
     return this.getById(id);
   },
 
-  async updatePrice(id: string, price: number, marketTime?: Date): Promise<void> {
+  async updatePrice(id: string, price: number, marketTime?: Date, previousClose?: number): Promise<void> {
     const now = new Date();
     // Yahoo returns regularMarketTime for US/IN equities & ETFs; invalid/missing → fetch time
     const quoteTime =
       marketTime != null && !Number.isNaN(marketTime.getTime()) ? marketTime : undefined;
 
+    const updates: Record<string, unknown> = { currentPrice: price, lastUpdated: now };
+    if (previousClose != null) updates.previousClose = previousClose;
+
     await db
       .update(schema.assets)
-      .set({ currentPrice: price, lastUpdated: now })
+      .set(updates)
       .where(eq(schema.assets.id, id));
 
     const lastEntry = await db

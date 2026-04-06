@@ -13,7 +13,7 @@ export interface ExchangeRate {
 }
 
 const rateCache = new Map<string, { rate: ExchangeRate; ts: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours — only refreshed explicitly via Refresh Prices
 
 async function yahooFxRate(from: string, to: string): Promise<number | null> {
   const symbol = `${from.toUpperCase()}${to.toUpperCase()}=X`;
@@ -107,6 +107,10 @@ export const exchangeRateProvider = {
       console.error(`Historical exchange rate error:`, error);
       return null;
     }
+  },
+
+  invalidateRate(from: string, to: string): void {
+    rateCache.delete(`${from.toUpperCase()}_${to.toUpperCase()}`);
   },
 
   getSupportedCurrencies(): string[] {

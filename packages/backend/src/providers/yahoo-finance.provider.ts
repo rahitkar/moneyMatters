@@ -4,6 +4,7 @@ export interface QuoteResult {
   symbol: string;
   name: string;
   price: number;
+  previousClose?: number;
   currency: string;
   change: number;
   changePercent: number;
@@ -43,6 +44,7 @@ export const yahooFinanceProvider = {
         symbol: quote.symbol,
         name: quote.shortName || quote.longName || symbol,
         price: quote.regularMarketPrice || 0,
+        previousClose: quote.regularMarketPreviousClose ?? undefined,
         currency: quote.currency || 'USD',
         change: quote.regularMarketChange || 0,
         changePercent: quote.regularMarketChangePercent || 0,
