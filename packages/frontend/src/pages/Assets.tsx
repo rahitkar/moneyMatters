@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, Fragment } from 'react';
+import { useState, useMemo, useCallback, useEffect, Fragment, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -23,6 +23,8 @@ import {
   DollarSign,
   TrendingUp,
   TrendingDown,
+  MoreHorizontal,
+  type LucideIcon,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
@@ -54,7 +56,7 @@ import {
   useDayChanges,
 } from '../api/hooks';
 import type { DayChangeMap } from '../api/hooks';
-import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime } from '../lib/format';
+import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime, formatActivityDateTime } from '../lib/format';
 import type { AssetClass, Provider, Tag, SearchResult, Position, TransactionWithAsset } from '../api/types';
 
 import CurrencyValue, { toInr } from '../components/CurrencyValue';
@@ -258,6 +260,15 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
 type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent' | 'dayChange' | 'weight' | 'lastActivity';
 type SortDirection = 'asc' | 'desc';
 
+/** Parse backend lastActivityDate (ISO, YYYY-MM-DD, or epoch ms string) for chronological sort. */
+function lastActivityToMs(value: string | null | undefined): number | null {
+  if (value == null || value === '') return null;
+  const asNum = Number(value);
+  const date = Number.isNaN(asNum) ? new Date(value) : new Date(asNum);
+  const ms = date.getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 function compareFn(a: Position, b: Position, field: SortField, dir: SortDirection, usdToInr: number | null, dayChanges?: DayChangeMap): number {
   const inr = (v: number, cur: string) => toInr(v, cur, usdToInr);
   let cmp = 0;
@@ -298,9 +309,15 @@ function compareFn(a: Position, b: Position, field: SortField, dir: SortDirectio
     case 'weight':
       cmp = inr(a.currentValue, a.currency) - inr(b.currentValue, b.currency);
       break;
-    case 'lastActivity':
-      cmp = (a.lastActivityDate ?? '').localeCompare(b.lastActivityDate ?? '');
+    case 'lastActivity': {
+      const ta = lastActivityToMs(a.lastActivityDate);
+      const tb = lastActivityToMs(b.lastActivityDate);
+      if (ta == null && tb == null) cmp = 0;
+      else if (ta == null) cmp = 1;
+      else if (tb == null) cmp = -1;
+      else cmp = ta - tb;
       break;
+    }
   }
   return dir === 'asc' ? cmp : -cmp;
 }
@@ -422,6 +439,7 @@ export default function Assets() {
   const [showFilters, setShowFilters] = useState(false);
   const [colFilter, setColFilter] = useState<ColFilter>({ ...EMPTY_COL_FILTER });
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const positionTableColSpan = (bulkSelectMode ? 1 : 0) + 13;
   const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
   const [dimensionFilter, setDimensionFilter] = useState<{ dimension: AllocDimension; label: string } | null>(null);
@@ -611,7 +629,7 @@ export default function Assets() {
   const hasNoPositions = !positions || positions.length === 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-4 animate-fade-in">
+    <div className="flex min-h-0 min-w-0 flex-col gap-4 h-full animate-fade-in">
       <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-bold text-surface-100">Assets</h1>
         <div className="flex items-center gap-2">
@@ -931,22 +949,23 @@ export default function Assets() {
 
       {/* Positions Table */}
       {filteredPositions.length > 0 ? (
-        <Card padding="sm" className="flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <table className="w-full table-fixed">
+        <Card padding="sm" className="flex-1 min-h-0 min-w-0 flex flex-col">
+          <div className="flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto">
+            <table className="w-full min-w-0 table-fixed [&_thead_th]:!px-1.5 [&_tbody_td]:!px-1.5">
               <colgroup>
                 {bulkSelectMode && <col className="w-8" />}
-                <col className="w-8" />
-                <col style={{ width: '16%' }} />
-                <col className="w-[68px]" />
+                <col style={{ width: '2%' }} />
+                <col style={{ width: '19%' }} />
+                <col style={{ width: '6%' }} />
                 <col style={{ width: '5%' }} />
                 <col style={{ width: '9%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '10%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '11%' }} />
                 <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
+                <col style={{ width: '4%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '10%' }} />
+                <col style={{ width: '4%' }} />
                 <col style={{ width: '5%' }} />
               </colgroup>
               <thead className="sticky top-0 z-10">
@@ -962,10 +981,12 @@ export default function Assets() {
                       />
                     </th>
                   )}
-                  <th className="table-header w-8"></th>
+                  <th scope="col" className="table-header !px-1">
+                    <span className="sr-only">Expand</span>
+                  </th>
                   <SortableHeader field="name" label="Name" current={sortField} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader field="assetClass" label="Class" current={sortField} dir={sortDir} onSort={handleSort} align="center" />
-                  <SortableHeader field="quantity" label="Qty" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <SortableHeader field="assetClass" label="Class" current={sortField} dir={sortDir} onSort={handleSort} align="center" thClassName="!px-1.5 !pr-3" />
+                  <SortableHeader field="quantity" label="Qty" current={sortField} dir={sortDir} onSort={handleSort} align="right" thClassName="!pl-3" />
                   <SortableHeader field="averageCost" label="Avg Cost" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="currentPrice" label="LTP" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="currentValue" label="Current" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
@@ -974,7 +995,7 @@ export default function Assets() {
                   <SortableHeader field="pnlPercent" label="P&L%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="dayChange" label="Day Chg" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="weight" label="Wt%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
-                  <SortableHeader field="lastActivity" label="Upd." current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <SortableHeader field="lastActivity" label="Upd." current={sortField} dir={sortDir} onSort={handleSort} align="right" thClassName="!pl-1 !pr-1" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
@@ -994,28 +1015,31 @@ export default function Assets() {
                         )
                       }
                       onSelectToggle={() => toggleAssetSelection(position.assetId)}
-                      onTagClick={() => {
-                        setSelectedAssetId(position.assetId);
-                        setIsTagModalOpen(true);
-                      }}
-                      onSplitClick={() =>
-                        setSplitTarget({
-                          assetId: position.assetId,
-                          symbol: position.symbol,
-                          name: position.name,
-                        })
-                      }
-                      onUpdateBalance={() => setBalanceTarget(position)}
-                      onDeposit={() => setDepositTarget(position)}
-                      onMetalTransaction={() => setMetalTxTarget(position)}
                     />
                     {expandedAssetId === position.assetId && (
                       <TransactionRows
+                        colSpan={positionTableColSpan}
+                        assetId={position.assetId}
+                        assetClass={position.assetClass}
                         transactions={txByAsset.get(position.assetId) ?? []}
                         symbol={position.symbol}
                         currentPrice={position.currentPrice ?? 0}
                         currency={position.currency || 'INR'}
                         usdToInr={usdToInr}
+                        onTagClick={() => {
+                          setSelectedAssetId(position.assetId);
+                          setIsTagModalOpen(true);
+                        }}
+                        onSplitClick={() =>
+                          setSplitTarget({
+                            assetId: position.assetId,
+                            symbol: position.symbol,
+                            name: position.name,
+                          })
+                        }
+                        onUpdateBalance={() => setBalanceTarget(position)}
+                        onDeposit={() => setDepositTarget(position)}
+                        onMetalTransaction={() => setMetalTxTarget(position)}
                       />
                     )}
                   </Fragment>
@@ -1133,6 +1157,7 @@ function SortableHeader({
   dir,
   onSort,
   align,
+  thClassName,
 }: {
   field: SortField;
   label: string;
@@ -1140,11 +1165,17 @@ function SortableHeader({
   dir: SortDirection;
   onSort: (field: SortField) => void;
   align?: 'right' | 'center';
+  thClassName?: string;
 }) {
   const isActive = current === field;
   return (
     <th
-      className={clsx('table-header cursor-pointer select-none hover:text-surface-100 transition-colors', align === 'right' && 'text-right', align === 'center' && 'text-center')}
+      className={clsx(
+        'table-header cursor-pointer select-none hover:text-surface-100 transition-colors',
+        align === 'right' && 'text-right',
+        align === 'center' && 'text-center',
+        thClassName,
+      )}
       onClick={() => onSort(field)}
     >
       <span className={clsx('inline-flex items-center gap-1', align === 'right' && 'justify-end', align === 'center' && 'justify-center')}>
@@ -1159,6 +1190,162 @@ function SortableHeader({
   );
 }
 
+function MenuActionBtn({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  className,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className={clsx(
+        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-surface-200 hover:bg-surface-700/80 disabled:opacity-40',
+        className,
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0 text-surface-400" />
+      {label}
+    </button>
+  );
+}
+
+function ExpandedAssetRowMenu({
+  assetId,
+  symbol,
+  assetClass,
+  onTagClick,
+  onSplitClick,
+  onUpdateBalance,
+  onDeposit,
+  onMetalTransaction,
+}: {
+  assetId: string;
+  symbol: string;
+  assetClass: AssetClass;
+  onTagClick: () => void;
+  onSplitClick: () => void;
+  onUpdateBalance: () => void;
+  onDeposit: () => void;
+  onMetalTransaction: () => void;
+}) {
+  const deleteAsset = useDeleteAsset();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const isManual = MANUAL_ASSET_CLASSES.has(assetClass);
+  const isMetal = PHYSICAL_METAL_CLASSES.has(assetClass);
+
+  const handleDelete = () => {
+    if (confirm(`Delete ${symbol}? This will also delete all transactions.`)) {
+      deleteAsset.mutate(assetId);
+      setOpen(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={clsx(
+          'rounded-md p-1.5 text-surface-500 transition-colors hover:bg-surface-700/50 hover:text-surface-200',
+          open && 'bg-surface-700/50 text-surface-200',
+        )}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title="Asset actions"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 top-full z-[100] mt-1 flex min-w-[10.75rem] flex-col gap-0.5 rounded-lg border border-surface-600 bg-surface-800 py-1 pl-1 pr-1 shadow-xl ring-1 ring-black/20"
+          role="menu"
+        >
+          {isMetal ? (
+            <MenuActionBtn
+              icon={Scale}
+              label="Buy / Sell metal"
+              onClick={() => {
+                setOpen(false);
+                onMetalTransaction();
+              }}
+              className="hover:bg-amber-500/10 hover:text-amber-400"
+            />
+          ) : isManual ? (
+            <>
+              <MenuActionBtn
+                icon={RefreshCw}
+                label="Update balance"
+                onClick={() => {
+                  setOpen(false);
+                  onUpdateBalance();
+                }}
+                className="hover:text-brand-400"
+              />
+              <MenuActionBtn
+                icon={PiggyBank}
+                label="Deposit / Withdraw"
+                onClick={() => {
+                  setOpen(false);
+                  onDeposit();
+                }}
+                className="hover:text-green-400"
+              />
+            </>
+          ) : (
+            <MenuActionBtn
+              icon={Scissors}
+              label="Stock split"
+              onClick={() => {
+                setOpen(false);
+                onSplitClick();
+              }}
+              className="hover:text-amber-400"
+            />
+          )}
+          <MenuActionBtn
+            icon={TagIcon}
+            label="Tags"
+            onClick={() => {
+              setOpen(false);
+              onTagClick();
+            }}
+          />
+          <MenuActionBtn
+            icon={Trash2}
+            label="Delete…"
+            onClick={handleDelete}
+            disabled={deleteAsset.isPending}
+            className="hover:bg-red-500/10 hover:text-red-400"
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PositionRow({
   position,
   usdToInr,
@@ -1169,11 +1356,6 @@ function PositionRow({
   isSelected,
   onToggle,
   onSelectToggle,
-  onTagClick,
-  onSplitClick,
-  onUpdateBalance,
-  onDeposit,
-  onMetalTransaction,
 }: {
   position: Position;
   usdToInr: number | null;
@@ -1184,13 +1366,7 @@ function PositionRow({
   isSelected: boolean;
   onToggle: () => void;
   onSelectToggle: () => void;
-  onTagClick: () => void;
-  onSplitClick: () => void;
-  onUpdateBalance: () => void;
-  onDeposit: () => void;
-  onMetalTransaction: () => void;
 }) {
-  const deleteAsset = useDeleteAsset();
   const setAssetTags = useSetAssetTags();
   const { data: assetWithTags } = useAsset(position.assetId);
   const cur = position.currency || 'INR';
@@ -1205,14 +1381,8 @@ function PositionRow({
   const adjGainPercent = position.totalCost > 0 ? (adjGain / position.totalCost) * 100 : 0;
   const isPositive = adjGain >= 0;
 
-  const handleDelete = () => {
-    if (confirm(`Delete ${position.symbol}? This will also delete all transactions.`)) {
-      deleteAsset.mutate(position.assetId);
-    }
-  };
-
   return (
-    <tr className={clsx('group relative hover:bg-surface-800/30 transition-colors', isExpanded && 'bg-surface-800/20', isSelected && 'bg-brand-500/5')}>
+    <tr className={clsx('hover:bg-surface-800/30 transition-colors [&_td]:align-top', isExpanded && 'bg-surface-800/20', isSelected && 'bg-brand-500/5')}>
       {bulkSelectMode && (
         <td className="table-cell w-8">
           <input
@@ -1223,19 +1393,21 @@ function PositionRow({
           />
         </td>
       )}
-      <td className="table-cell w-8">
+      <td className="table-cell whitespace-nowrap !px-1">
         <button
+          type="button"
           onClick={onToggle}
-          className="p-1 rounded text-surface-400 hover:text-surface-100 transition-colors"
+          className="rounded p-0.5 text-surface-400 hover:text-surface-100"
+          title={isExpanded ? 'Collapse' : 'Expand transactions'}
         >
-          <ChevronRight className={clsx('w-4 h-4 transition-transform', isExpanded && 'rotate-90')} />
+          <ChevronRight className={clsx('h-4 w-4 transition-transform', isExpanded && 'rotate-90')} />
         </button>
       </td>
-      <td className="table-cell">
-        <div>
+      <td className="table-cell min-w-0 whitespace-normal">
+        <div className="min-w-0 whitespace-normal">
           <span
             onClick={onToggle}
-            className="text-surface-200 text-sm leading-snug cursor-pointer select-all break-words"
+            className="block cursor-pointer whitespace-normal break-words text-sm leading-snug text-surface-200 select-text"
           >
             {position.name}
           </span>
@@ -1261,132 +1433,143 @@ function PositionRow({
             </div>
           )}
         </div>
-        {/* Hover actions */}
-        <div className="hidden group-hover:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-0.5 bg-surface-800 border border-surface-700 rounded-lg px-1 py-0.5 shadow-lg z-10">
-          {isMetal ? (
-            <button
-              onClick={onMetalTransaction}
-              className="p-1.5 rounded text-surface-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-              title="Buy / Sell metal"
-            >
-              <Scale className="w-3.5 h-3.5" />
-            </button>
-          ) : isManual ? (
-            <>
-              <button
-                onClick={onUpdateBalance}
-                className="p-1.5 rounded text-surface-400 hover:text-brand-400 hover:bg-brand-500/10 transition-colors"
-                title="Update balance"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={onDeposit}
-                className="p-1.5 rounded text-surface-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                title="Deposit / Withdraw"
-              >
-                <PiggyBank className="w-3.5 h-3.5" />
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={onSplitClick}
-              className="p-1.5 rounded text-surface-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-              title="Apply stock split"
-            >
-              <Scissors className="w-3.5 h-3.5" />
-            </button>
-          )}
-          <button
-            onClick={onTagClick}
-            className="p-1.5 rounded text-surface-400 hover:text-surface-100 hover:bg-surface-700/50 transition-colors"
-            title="Manage tags"
-          >
-            <TagIcon className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleteAsset.isPending}
-            className="p-1.5 rounded text-surface-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title="Delete asset and all transactions"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
       </td>
-      <td className="table-cell text-center">
-        <AssetClassBadge assetClass={position.assetClass} size="sm" />
+      <td className="table-cell overflow-hidden text-center whitespace-nowrap !px-1.5 !pr-3">
+        <span className="inline-flex max-w-full justify-center">
+          <AssetClassBadge assetClass={position.assetClass} size="sm" />
+        </span>
       </td>
-      <td className="table-cell text-right tabular-nums">
+      <td className="table-cell text-right tabular-nums whitespace-nowrap !pl-3 !pr-1.5">
         {formatNumber(position.quantity)}{isMetal && <span className="text-surface-500 text-xs ml-0.5">g</span>}
       </td>
-      <td className="table-cell text-right tabular-nums">
+      <td
+        className="table-cell min-w-0 text-right tabular-nums whitespace-nowrap"
+        title={formatCurrency(position.averageCost, cur)}
+      >
         <CurrencyValue value={position.averageCost} currency={cur} usdToInr={usdToInr} />
       </td>
-      <td className="table-cell text-right tabular-nums font-medium text-surface-100">
+      <td
+        className="table-cell min-w-0 whitespace-nowrap text-right tabular-nums font-medium text-surface-100"
+        title={
+          adjPrice
+            ? isMetal
+              ? `Market: ${formatCurrency(position.currentPrice!, cur)} · 5% deducted for charges/impurities`
+              : formatCurrency(adjPrice, cur)
+            : undefined
+        }
+      >
         {adjPrice
           ? (
-            <span title={isMetal ? `Market: ${formatCurrency(position.currentPrice!, cur)} · 5% deducted for charges/impurities` : undefined}>
+            <span className="inline-flex max-w-full items-center justify-end gap-0.5">
               <CurrencyValue value={adjPrice} currency={cur} usdToInr={usdToInr} />
-              {isMetal && <span className="text-surface-500 text-[10px] ml-0.5">*</span>}
+              {isMetal && <span className="shrink-0 text-surface-500 text-[10px]">*</span>}
             </span>
           )
           : '—'}
       </td>
-      <td className="table-cell text-right tabular-nums font-medium text-surface-100">
-        <span title={isMetal ? 'After 5% selling deduction' : undefined}>
-          <CurrencyValue value={adjValue} currency={cur} usdToInr={usdToInr} />
-        </span>
+      <td
+        className="table-cell min-w-0 whitespace-nowrap text-right tabular-nums font-medium text-surface-100"
+        title={isMetal ? `After 5% selling deduction · ${formatCurrency(adjValue, cur)}` : formatCurrency(adjValue, cur)}
+      >
+        <CurrencyValue value={adjValue} currency={cur} usdToInr={usdToInr} />
       </td>
-      <td className="table-cell text-right tabular-nums">
+      <td
+        className="table-cell min-w-0 whitespace-nowrap text-right tabular-nums"
+        title={formatCurrency(position.totalCost, cur)}
+      >
         <CurrencyValue value={position.totalCost} currency={cur} usdToInr={usdToInr} />
       </td>
-      <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
+      <td
+        className={clsx('table-cell min-w-0 whitespace-nowrap text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}
+        title={`${isPositive ? '+' : ''}${formatCurrency(adjGain, cur)}`}
+      >
         <CurrencyValue value={adjGain} currency={cur} usdToInr={usdToInr} sign />
       </td>
-      <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
+      <td className={clsx('table-cell text-right tabular-nums font-medium whitespace-nowrap', isPositive ? 'text-green-400' : 'text-red-400')}>
         {isPositive ? '+' : ''}{formatPercent(adjGainPercent)}
       </td>
       <td className="table-cell text-right tabular-nums text-xs">
         {dayChange ? (
           <div className={dayChange.dayChangeValue >= 0 ? 'text-green-400' : 'text-red-400'}>
-            <div className="font-medium">{dayChange.dayChangeValue >= 0 ? '+' : ''}{formatCurrency(dayChange.dayChangeValue, 'INR')}</div>
-            <div className="text-[10px] opacity-70">{dayChange.dayChangePercent >= 0 ? '+' : ''}{formatPercent(dayChange.dayChangePercent)}</div>
+            <div className="whitespace-nowrap font-medium">{dayChange.dayChangeValue >= 0 ? '+' : ''}{formatCurrency(dayChange.dayChangeValue, 'INR')}</div>
+            <div className="whitespace-nowrap text-[10px] opacity-70">{dayChange.dayChangePercent >= 0 ? '+' : ''}{formatPercent(dayChange.dayChangePercent)}</div>
           </div>
         ) : (
           <span className="text-surface-500">—</span>
         )}
       </td>
-      <td className="table-cell text-right tabular-nums text-surface-300 text-xs">
+      <td className="table-cell text-right tabular-nums text-surface-300 text-xs whitespace-nowrap">
         {totalValue > 0 ? formatPercent((toInr(adjValue, cur, usdToInr) / totalValue) * 100) : '—'}
       </td>
-      <td className="table-cell text-right text-xs text-surface-500">
-        {formatRelativeTime(position.lastActivityDate)}
+      <td className="table-cell !px-1 overflow-visible text-right text-xs text-surface-500">
+        {position.lastActivityDate ? (
+          <span className="group/updt relative block min-w-0 text-right">
+            <span className="inline-block max-w-full cursor-default whitespace-nowrap border-b border-dotted border-surface-500/50">
+              {formatRelativeTime(position.lastActivityDate)}
+            </span>
+            <span
+              className="pointer-events-none invisible absolute right-0 top-full z-[80] mt-1 w-max max-w-[min(280px,calc(100vw-2rem))] rounded-md border border-surface-600 bg-surface-800 px-2 py-1.5 text-left text-[11px] leading-snug text-surface-100 shadow-lg opacity-0 transition-opacity duration-75 group-hover/updt:visible group-hover/updt:opacity-100"
+              role="tooltip"
+            >
+              {formatActivityDateTime(position.lastActivityDate) || position.lastActivityDate}
+            </span>
+          </span>
+        ) : (
+          <span>—</span>
+        )}
       </td>
     </tr>
   );
 }
 
 function TransactionRows({
+  colSpan,
+  assetId,
+  assetClass,
   transactions,
   symbol,
   currentPrice,
   currency,
   usdToInr,
+  onTagClick,
+  onSplitClick,
+  onUpdateBalance,
+  onDeposit,
+  onMetalTransaction,
 }: {
+  colSpan: number;
+  assetId: string;
+  assetClass: AssetClass;
   transactions: TransactionWithAsset[];
   symbol: string;
   currentPrice: number;
   currency: string;
   usdToInr: number | null;
+  onTagClick: () => void;
+  onSplitClick: () => void;
+  onUpdateBalance: () => void;
+  onDeposit: () => void;
+  onMetalTransaction: () => void;
 }) {
   const thClass = 'text-xs font-medium text-surface-500 uppercase tracking-wider py-2 px-3';
 
   if (transactions.length === 0) {
     return (
       <tr>
-        <td colSpan={14} className="px-6 py-4">
-          <p className="text-sm text-surface-500 text-center">No transactions found for {symbol}</p>
+        <td colSpan={colSpan} className="px-6 py-4">
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+            <p className="text-sm text-surface-500 text-center sm:text-left">No transactions found for {symbol}</p>
+            <ExpandedAssetRowMenu
+              assetId={assetId}
+              symbol={symbol}
+              assetClass={assetClass}
+              onTagClick={onTagClick}
+              onSplitClick={onSplitClick}
+              onUpdateBalance={onUpdateBalance}
+              onDeposit={onDeposit}
+              onMetalTransaction={onMetalTransaction}
+            />
+          </div>
         </td>
       </tr>
     );
@@ -1395,8 +1578,20 @@ function TransactionRows({
   return (
     <>
       <tr className="bg-surface-800/40">
-        <td colSpan={14} className="px-6 py-2">
-          <div className="mb-2 text-xs font-medium text-surface-500 uppercase tracking-wider">{symbol}</div>
+        <td colSpan={colSpan} className="px-4 py-2 sm:px-6">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-medium text-surface-500 uppercase tracking-wider">{symbol}</div>
+            <ExpandedAssetRowMenu
+              assetId={assetId}
+              symbol={symbol}
+              assetClass={assetClass}
+              onTagClick={onTagClick}
+              onSplitClick={onSplitClick}
+              onUpdateBalance={onUpdateBalance}
+              onDeposit={onDeposit}
+              onMetalTransaction={onMetalTransaction}
+            />
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

@@ -78,6 +78,23 @@ export function formatDateTime(dateString: string): string {
   });
 }
 
+/** Full date/time in IST for tooltips (handles epoch ms or ISO strings). */
+export function formatActivityDateTime(value: string | number | null | undefined): string {
+  if (value == null || value === '') return '';
+  const ts = typeof value === 'number' ? value : Number(value);
+  const date = Number.isNaN(ts) ? new Date(value as string) : new Date(ts);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: USER_TZ,
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
+}
+
 export function formatRelativeTime(value: string | number | null | undefined): string {
   if (value == null) return '—';
   const ts = typeof value === 'number' ? value : Number(value);
