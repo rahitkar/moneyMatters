@@ -5,9 +5,13 @@ import {
   Calendar,
   DollarSign,
   TrendingUp,
+  TrendingDown,
   ShoppingCart,
   PiggyBank,
   Printer,
+  ArrowUpRight,
+  ArrowDownRight,
+  Wallet,
 } from 'lucide-react';
 import {
   BarChart,
@@ -27,11 +31,12 @@ import StatCard from '../components/StatCard';
 import { LoadingPage } from '../components/LoadingSpinner';
 import { formatCurrency, todayLocal } from '../lib/format';
 import { useReport } from '../api/hooks';
-import type { CashFlowMonthSummary } from '../api/types';
+import type { CashFlowMonthSummary, PortfolioSummary, HoldingWithValue } from '../api/types';
 
 type Period = 'monthly' | 'quarterly' | 'yearly';
 
 const PIE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#a855f7', '#ec4899', '#14b8a6', '#f97316'];
+const tooltipStyle = { backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' };
 
 function getFYYear(): string {
   const [y, m] = todayLocal().split('-').map(Number);
@@ -56,6 +61,10 @@ function shortMonthLabel(m: string): string {
   return new Date(parseInt(y), parseInt(mo) - 1).toLocaleDateString('en-IN', { month: 'short' });
 }
 
+function fmtPct(v: number): string {
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+}
+
 export default function Reports() {
   const [period, setPeriod] = useState<Period>('monthly');
   const [monthInput, setMonthInput] = useState(getCurrentMonth());
@@ -70,7 +79,11 @@ export default function Reports() {
   const monthDetails = (report?.monthDetails ?? report?.cashFlow ? [report.cashFlow] : []) as CashFlowMonthSummary[];
 
   const aggregate = report?.aggregate as { totalIncome: number; totalExpenses: number; totalInvested: number; totalSavings: number } | undefined;
-  const portfolio = report?.portfolio as { totalValue: number; totalCost: number; unrealizedGain: number } | undefined;
+  const portfolio = report?.portfolio as PortfolioSummary | undefined;
+  const dayChange = report?.dayChange as { change: number; changePercent: number } | null | undefined;
+  const topPerformers = report?.topPerformers as HoldingWithValue[] | undefined;
+  const worstPerformers = report?.worstPerformers as HoldingWithValue[] | undefined;
+  const perfIntervals = report?.performanceIntervals as Record<string, { absoluteReturn: number; percentageReturn: number; annualizedReturn: number | null }> | undefined;
 
   const monthlyForChart = useMemo(() => {
     if (!monthDetails || monthDetails.length <= 1) return null;
@@ -97,7 +110,6 @@ export default function Reports() {
       .sort((a, b) => b.value - a.value);
   }, [monthDetails]);
 
-  // Derive aggregate from single month if needed
   const effectiveAggregate = aggregate ?? (monthDetails.length === 1 ? {
     totalIncome: monthDetails[0].totals.totalIncome,
     totalExpenses: monthDetails[0].totals.totalExpenses,
@@ -180,57 +192,152 @@ export default function Reports() {
 
       {isLoading && <LoadingPage />}
 
-      {!isLoading && effectiveAggregate && (
+      {!isLoading && (effectiveAggregate || portfolio) && (
         <>
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              label="Total Income"
-              value={formatCurrency(effectiveAggregate.totalIncome, 'INR')}
-              icon={DollarSign}
-              variant="brand"
-            />
-            <StatCard
-              label="Total Expenses"
-              value={formatCurrency(effectiveAggregate.totalExpenses, 'INR')}
-              icon={ShoppingCart}
-              isPositive={false}
-            />
-            <StatCard
-              label="Total Investment"
-              value={formatCurrency(effectiveAggregate.totalInvested, 'INR')}
-              icon={TrendingUp}
-              variant="brand"
-            />
-            <StatCard
-              label="Savings"
-              value={formatCurrency(effectiveAggregate.totalSavings, 'INR')}
-              icon={PiggyBank}
-              isPositive={effectiveAggregate.totalSavings >= 0}
-            />
-          </div>
-
-          {/* Portfolio Overview */}
+          {/* ── Portfolio Snapshot + Day Change ─────────────── */}
           {portfolio && (
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <StatCard
+                label="Portfolio Value"
+                value={formatCurrency(portfolio.totalValue, 'INR')}
+                subValue={`${portfolio.holdingCount} holdings · ${portfolio.assetCount} assets`}
+                icon={Wallet}
+                variant="brand"
+              />
+              <StatCard
+                label="Invested"
+                value={formatCurrency(portfolio.totalCost, 'INR')}
+                icon={DollarSign}
+                variant="neutral"
+              />
+              <StatCard
+                label="Total P&L"
+                value={`${portfolio.totalGain >= 0 ? '+' : ''}${formatCurrency(portfolio.totalGain, 'INR')}`}
+                subValue={fmtPct(portfolio.totalGainPercent)}
+                icon={portfolio.totalGain >= 0 ? TrendingUp : TrendingDown}
+                isPositive={portfolio.totalGain >= 0}
+              />
+              {dayChange && (
+                <StatCard
+                  label="Day Change"
+                  value={`${dayChange.change >= 0 ? '+' : ''}${formatCurrency(dayChange.change, 'INR')}`}
+                  subValue={fmtPct(dayChange.changePercent)}
+                  icon={dayChange.change >= 0 ? ArrowUpRight : ArrowDownRight}
+                  isPositive={dayChange.change >= 0}
+                />
+              )}
+              {perfIntervals?.['1M'] && (
+                <StatCard
+                  label="1M Return"
+                  value={fmtPct(perfIntervals['1M'].percentageReturn)}
+                  subValue={`${perfIntervals['1M'].absoluteReturn >= 0 ? '+' : ''}${formatCurrency(perfIntervals['1M'].absoluteReturn, 'INR')}`}
+                  icon={perfIntervals['1M'].percentageReturn >= 0 ? TrendingUp : TrendingDown}
+                  isPositive={perfIntervals['1M'].percentageReturn >= 0}
+                />
+              )}
+            </div>
+          )}
+
+          {/* ── Performance Across Intervals ─────────────── */}
+          {perfIntervals && Object.keys(perfIntervals).length > 0 && (
             <Card>
-              <h2 className="text-lg font-semibold text-surface-100 mb-4">Portfolio Snapshot</h2>
-              <div className="grid grid-cols-3 gap-6">
-                <div>
-                  <p className="text-xs text-surface-500 uppercase tracking-wider mb-1">Portfolio Value</p>
-                  <p className="text-xl font-bold text-surface-100">{formatCurrency(portfolio.totalValue, 'INR')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-surface-500 uppercase tracking-wider mb-1">Total Invested</p>
-                  <p className="text-xl font-bold text-surface-300">{formatCurrency(portfolio.totalCost, 'INR')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-surface-500 uppercase tracking-wider mb-1">Unrealized P&L</p>
-                  <p className={clsx('text-xl font-bold', portfolio.unrealizedGain >= 0 ? 'text-green-400' : 'text-red-400')}>
-                    {portfolio.unrealizedGain >= 0 ? '+' : ''}{formatCurrency(portfolio.unrealizedGain, 'INR')}
-                  </p>
-                </div>
+              <h2 className="text-lg font-semibold text-surface-100 mb-4">Returns Summary</h2>
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                {(['5D', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'] as const).map((iv) => {
+                  const p = perfIntervals[iv];
+                  if (!p) return null;
+                  return (
+                    <div key={iv} className="text-center p-3 rounded-lg bg-surface-800/50">
+                      <div className="text-[10px] text-surface-500 uppercase font-medium mb-1">{iv}</div>
+                      <div className={clsx('text-base font-bold tabular-nums', p.percentageReturn >= 0 ? 'text-green-400' : 'text-red-400')}>
+                        {fmtPct(p.percentageReturn)}
+                      </div>
+                      <div className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
+                        {p.absoluteReturn >= 0 ? '+' : ''}{formatCurrency(p.absoluteReturn, 'INR')}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
+          )}
+
+          {/* ── Top/Worst Performers ──────────────────── */}
+          {(topPerformers?.length || worstPerformers?.length) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {topPerformers && topPerformers.length > 0 && (
+                <Card>
+                  <h2 className="text-sm font-semibold text-surface-100 mb-3">Top Performers</h2>
+                  <div className="space-y-2">
+                    {topPerformers.map((h) => (
+                      <div key={h.id} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs text-surface-200 font-medium truncate">{h.symbol}</div>
+                          <div className="text-[10px] text-surface-500 truncate">{h.name}</div>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <div className="text-xs font-bold text-green-400 tabular-nums">{fmtPct(h.gainPercent)}</div>
+                          <div className="text-[10px] text-surface-500 tabular-nums">{formatCurrency(h.gain, 'INR')}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {worstPerformers && worstPerformers.length > 0 && (
+                <Card>
+                  <h2 className="text-sm font-semibold text-surface-100 mb-3">Worst Performers</h2>
+                  <div className="space-y-2">
+                    {worstPerformers.map((h) => (
+                      <div key={h.id} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs text-surface-200 font-medium truncate">{h.symbol}</div>
+                          <div className="text-[10px] text-surface-500 truncate">{h.name}</div>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <div className="text-xs font-bold text-red-400 tabular-nums">{fmtPct(h.gainPercent)}</div>
+                          <div className="text-[10px] text-surface-500 tabular-nums">{formatCurrency(h.gain, 'INR')}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* ── Cash Flow Summary Cards ─────────────────── */}
+          {effectiveAggregate && (
+            <>
+              <h2 className="text-lg font-semibold text-surface-100">Cash Flow</h2>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                  label="Income"
+                  value={formatCurrency(effectiveAggregate.totalIncome, 'INR')}
+                  icon={DollarSign}
+                  variant="brand"
+                />
+                <StatCard
+                  label="Expenses"
+                  value={formatCurrency(effectiveAggregate.totalExpenses, 'INR')}
+                  icon={ShoppingCart}
+                  isPositive={false}
+                />
+                <StatCard
+                  label="Investment"
+                  value={formatCurrency(effectiveAggregate.totalInvested, 'INR')}
+                  icon={TrendingUp}
+                  variant="brand"
+                />
+                <StatCard
+                  label="Savings"
+                  value={formatCurrency(effectiveAggregate.totalSavings, 'INR')}
+                  icon={PiggyBank}
+                  isPositive={effectiveAggregate.totalSavings >= 0}
+                />
+              </div>
+            </>
           )}
 
           {/* Month-over-month chart (quarterly/yearly) */}
@@ -244,7 +351,7 @@ export default function Reports() {
                     <XAxis dataKey="month" stroke="#71717a" fontSize={12} />
                     <YAxis stroke="#71717a" fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
+                      contentStyle={tooltipStyle}
                       labelStyle={{ color: '#a1a1aa' }}
                       formatter={(value: number, name: string) => [formatCurrency(value, 'INR'), name.charAt(0).toUpperCase() + name.slice(1)]}
                     />
@@ -283,7 +390,7 @@ export default function Reports() {
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
+                        contentStyle={tooltipStyle}
                         formatter={(value: number) => [formatCurrency(value, 'INR'), 'Amount']}
                       />
                     </PieChart>
@@ -333,8 +440,8 @@ export default function Reports() {
             </Card>
           )}
 
-          {/* Monthly Target vs Actual (for yearly/quarterly) */}
-          {monthDetails.length > 1 && (
+          {/* Monthly Summary Table (for yearly/quarterly) */}
+          {monthDetails.length > 1 && effectiveAggregate && (
             <Card>
               <h2 className="text-lg font-semibold text-surface-100 mb-4">Monthly Summary Table</h2>
               <div className="overflow-x-auto">
@@ -379,7 +486,7 @@ export default function Reports() {
         </>
       )}
 
-      {!isLoading && !effectiveAggregate && (
+      {!isLoading && !effectiveAggregate && !portfolio && (
         <Card>
           <div className="text-center py-12">
             <FileBarChart className="w-12 h-12 text-surface-600 mx-auto mb-4" />

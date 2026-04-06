@@ -23,13 +23,15 @@ export interface BenchmarkPerformance {
 
 // Calculate start date based on interval
 function getStartDate(interval: TimeInterval, overrideStartStr?: string): Date {
-  if ((interval === 'ALL' || interval === 'CUSTOM') && overrideStartStr) {
+  if (overrideStartStr) {
     return new Date(overrideStartStr);
   }
   const now = new Date();
   switch (interval) {
     case '1D':
       return new Date(now.setDate(now.getDate() - 1));
+    case '5D':
+      return new Date(now.setDate(now.getDate() - 5));
     case '1W':
       return new Date(now.setDate(now.getDate() - 7));
     case '1M':

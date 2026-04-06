@@ -16,9 +16,12 @@ import {
   Tooltip,
   LineChart,
   Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
+  Legend,
 } from 'recharts';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
@@ -33,14 +36,14 @@ import {
   useTopPerformers,
   useWorstPerformers,
   usePortfolioPerformance,
+  usePortfolioBreakdown,
   useRealizedGainsTotal,
   useExchangeRate,
 } from '../api/hooks';
+import type { AllocDimension } from '../api/hooks';
 import { formatCurrency, formatPercent, formatNumber, formatDate } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { TimeInterval, DimensionSlice } from '../api/types';
-
-type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity' | 'byOwnership';
 
 const DIMENSION_TABS: { value: AllocDimension; label: string }[] = [
   { value: 'byRiskProfile', label: 'Risk Profile' },
@@ -207,9 +210,26 @@ export default function Dashboard() {
   const { data: topPerformers } = useTopPerformers(5);
   const { data: worstPerformers } = useWorstPerformers(5);
   const { data: performance } = usePortfolioPerformance(perfInterval);
+  const { data: breakdownSeries } = usePortfolioBreakdown(perfInterval, allocDimension);
   const { data: realizedGains } = useRealizedGainsTotal();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = summary?.usdToInr ?? usdInrRate?.rate ?? null;
+
+  // Extract unique category keys from breakdown series, ordered by final-date value
+  const breakdownCategories = useMemo(() => {
+    if (!breakdownSeries || breakdownSeries.length === 0) return [];
+    const last = breakdownSeries[breakdownSeries.length - 1];
+    const keys = Object.keys(last).filter((k) => k !== 'date' && k !== 'total');
+    return keys.sort((a, b) => ((last[b] as number) ?? 0) - ((last[a] as number) ?? 0));
+  }, [breakdownSeries]);
+
+  // Map category name → color, matching the allocation pie slices
+  const categoryColorMap = useMemo(() => {
+    const slices: DimensionSlice[] = multiAlloc?.[allocDimension] ?? [];
+    const map = new Map<string, string>();
+    slices.forEach((s, idx) => map.set(s.label, getSliceColor(idx)));
+    return map;
+  }, [multiAlloc, allocDimension]);
 
   const filteredHoldings = useMemo(() => {
     if (!holdings) return [];
@@ -607,6 +627,9 @@ export default function Dashboard() {
           <h2 className="text-lg font-semibold text-surface-100 flex items-center gap-2">
             <Activity className="w-5 h-5 text-brand-400" />
             Portfolio Performance
+            {selectedSlice && (
+              <span className="text-sm font-normal text-brand-400">— {selectedSlice}</span>
+            )}
           </h2>
           <div className="flex items-center gap-2">
             {TIME_INTERVALS.map((ti) => (
@@ -691,42 +714,87 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
-            <div className="h-48">
+            <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={performance.valueHistory}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                  <XAxis
-                    dataKey="date"
-                    stroke="#71717a"
-                    fontSize={11}
-                    tickFormatter={(d) => formatDate(d)}
-                  />
-                  <YAxis
-                    stroke="#71717a"
-                    fontSize={11}
-                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#18181b',
-                      border: '1px solid #3f3f46',
-                      borderRadius: '10px',
-                      padding: '8px 14px',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-                    }}
-                    itemStyle={{ color: '#e4e4e7' }}
-                    labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
-                    labelFormatter={(d) => formatDate(d)}
-                    formatter={(value: number) => [formatCurrency(value, 'INR'), 'Value']}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="value"
-                    stroke="#22c55e"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
+                {breakdownSeries && breakdownSeries.length > 1 && breakdownCategories.length > 0 ? (
+                  <AreaChart data={breakdownSeries} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                    <XAxis dataKey="date" stroke="#52525b" fontSize={11} tickFormatter={(d) => formatDate(d)} />
+                    <YAxis stroke="#52525b" fontSize={11} tickFormatter={(v) => {
+                      if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
+                      if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
+                      return `₹${(v / 1000).toFixed(0)}k`;
+                    }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#18181b',
+                        border: '1px solid #3f3f46',
+                        borderRadius: '10px',
+                        padding: '8px 14px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+                      }}
+                      labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
+                      labelFormatter={(d) => formatDate(d)}
+                      formatter={(value: number, name: string) => [
+                        formatCurrency(value, 'INR'),
+                        name === 'total' ? 'Total' : name,
+                      ]}
+                    />
+                    <Legend
+                      formatter={(v) => v === 'total' ? 'Total' : v}
+                      wrapperStyle={{ fontSize: 11 }}
+                    />
+                    {breakdownCategories.map((cat) => {
+                      const color = categoryColorMap.get(cat) ?? '#6366f1';
+                      const dimmed = selectedSlice && selectedSlice !== cat;
+                      return (
+                        <Area
+                          key={cat}
+                          type="monotone"
+                          dataKey={cat}
+                          stroke={color}
+                          fill={color}
+                          fillOpacity={dimmed ? 0.03 : 0.15}
+                          strokeWidth={dimmed ? 0.5 : 1.5}
+                          strokeOpacity={dimmed ? 0.25 : 1}
+                          dot={false}
+                          connectNulls
+                        />
+                      );
+                    })}
+                    <Area
+                      type="monotone"
+                      dataKey="total"
+                      stroke="#e4e4e7"
+                      fill="none"
+                      strokeWidth={2}
+                      strokeDasharray={selectedSlice ? '6 3' : undefined}
+                      strokeOpacity={selectedSlice ? 0.4 : 1}
+                      dot={false}
+                      connectNulls
+                    />
+                  </AreaChart>
+                ) : (
+                  <LineChart data={performance.valueHistory}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                    <XAxis dataKey="date" stroke="#71717a" fontSize={11} tickFormatter={(d) => formatDate(d)} />
+                    <YAxis stroke="#71717a" fontSize={11} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#18181b',
+                        border: '1px solid #3f3f46',
+                        borderRadius: '10px',
+                        padding: '8px 14px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+                      }}
+                      itemStyle={{ color: '#e4e4e7' }}
+                      labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
+                      labelFormatter={(d) => formatDate(d)}
+                      formatter={(value: number) => [formatCurrency(value, 'INR'), 'Value']}
+                    />
+                    <Line type="monotone" dataKey="value" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             </div>
             <div className="mt-4 text-center">

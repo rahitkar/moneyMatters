@@ -90,6 +90,8 @@ function getStartDate(interval: TimeInterval): Date | null {
   switch (interval) {
     case '1D':
       return new Date(now.setDate(now.getDate() - 1));
+    case '5D':
+      return new Date(now.setDate(now.getDate() - 5));
     case '1W':
       return new Date(now.setDate(now.getDate() - 7));
     case '1M':
@@ -150,7 +152,7 @@ function generateSampleDates(startStr: string, endStr: string, interval: TimeInt
 
   let stepDays: number;
   switch (interval) {
-    case '1D': case '1W': case '1M': stepDays = 1; break;
+    case '1D': case '5D': case '1W': case '1M': stepDays = 1; break;
     case '3M': stepDays = 3; break;
     case '6M': case '1Y': case 'YTD': stepDays = 7; break;
     case 'ALL': stepDays = 14; break;
@@ -210,6 +212,100 @@ async function resolveSegmentAssetIds(segments: string[]): Promise<Set<string> |
   return ids;
 }
 
+export type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity' | 'byOwnership';
+
+const ALLOC_METAL = new Set(['gold', 'gold_physical', 'silver', 'silver_physical', 'metals']);
+const ALLOC_CASH = new Set(['cash', 'fixed_deposit', 'lended', 'bonds']);
+const ALLOC_GOV = new Set(['ppf', 'epf', 'nps']);
+const ALLOC_MF = new Set(['mutual_fund', 'mutual_fund_equity', 'mutual_fund_debt']);
+const isIndian = (s: string) => s.endsWith('.NS') || s.endsWith('.BO');
+
+export function getDimensionLabel(dim: AllocDimension, assetClass: string, symbol: string, currency: string): string {
+  const indian = isIndian(symbol);
+  switch (dim) {
+    case 'byAssetClass':
+      switch (assetClass) {
+        case 'stocks': return 'Stocks'; case 'etf': return 'ETF';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Fund';
+        case 'gold': return 'Gold'; case 'gold_physical': return 'Gold (Physical)';
+        case 'silver': return 'Silver'; case 'silver_physical': return 'Silver (Physical)';
+        case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
+        default: return assetClass;
+      }
+    case 'bySubCategory':
+      switch (assetClass) {
+        case 'stocks': return indian ? 'Indian Stocks' : 'US Stocks';
+        case 'etf': return indian ? 'Indian ETFs' : 'US ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': return 'MF Equity';
+        case 'mutual_fund_debt': return 'MF Debt';
+        case 'gold': return 'Gold ETF'; case 'gold_physical': return 'Gold (Physical)';
+        case 'silver': return 'Silver ETF'; case 'silver_physical': return 'Silver (Physical)';
+        case 'metals': return 'Commodities';
+        case 'ppf': return 'PPF'; case 'epf': return 'EPF'; case 'nps': return 'NPS';
+        case 'fixed_deposit': return 'Fixed Deposit'; case 'lended': return 'Lended';
+        case 'crypto': return 'Crypto'; case 'cash': return 'Cash'; case 'bonds': return 'Bonds';
+        case 'real_estate': return 'Property'; case 'vehicle': return 'Vehicle';
+        case 'external_portfolio': return 'External Portfolio';
+        default: return assetClass;
+      }
+    case 'byGeography':
+      if (ALLOC_METAL.has(assetClass)) return 'Metals';
+      if (ALLOC_CASH.has(assetClass)) return 'Cash & Equivalents';
+      if (assetClass === 'real_estate' || assetClass === 'vehicle') return 'Physical Assets';
+      if (assetClass === 'crypto') return 'Crypto';
+      if (assetClass === 'external_portfolio') return 'External';
+      if (ALLOC_GOV.has(assetClass) || ALLOC_MF.has(assetClass)) return 'India';
+      return indian ? 'India' : 'International';
+    case 'byInstrumentType':
+      switch (assetClass) {
+        case 'stocks': return 'Equities'; case 'etf': return 'ETFs';
+        case 'mutual_fund': case 'mutual_fund_equity': case 'mutual_fund_debt': return 'Mutual Funds';
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical': case 'metals': return 'Commodities';
+        case 'ppf': case 'epf': case 'nps': return 'Gov Schemes';
+        case 'fixed_deposit': case 'bonds': return 'Fixed Income';
+        case 'crypto': return 'Crypto'; case 'lended': return 'Lended'; case 'cash': return 'Cash';
+        case 'real_estate': case 'vehicle': return 'Physical Assets';
+        case 'external_portfolio': return 'External Portfolio';
+        default: return 'Other';
+      }
+    case 'byRiskProfile':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'gold': case 'gold_physical': case 'silver': case 'silver_physical':
+        case 'metals': case 'crypto': case 'external_portfolio':
+          return 'Growth Investment';
+        case 'mutual_fund_debt': case 'bonds': case 'fixed_deposit': return 'Protective Investment';
+        case 'lended': return 'Lended';
+        case 'epf': case 'ppf': case 'nps': return 'Retirement';
+        case 'real_estate': case 'vehicle': return 'Physical Asset';
+        case 'cash': return 'Cash';
+        default: return 'Other';
+      }
+    case 'byLiquidity':
+      switch (assetClass) {
+        case 'stocks': case 'etf': case 'mutual_fund': case 'mutual_fund_equity':
+        case 'mutual_fund_debt': case 'crypto': case 'cash': case 'bonds':
+        case 'fixed_deposit': case 'external_portfolio':
+        case 'gold': case 'silver': case 'metals':
+          return 'Liquid';
+        case 'gold_physical': case 'silver_physical':
+        case 'ppf': case 'epf': case 'nps':
+        case 'lended': case 'real_estate': case 'vehicle':
+          return 'Non-Liquid';
+        default: return 'Other';
+      }
+    case 'byCurrency':
+      return currency || 'INR';
+    case 'byOwnership':
+      return assetClass === 'external_portfolio' ? "Dad's Portfolio" : 'My Portfolio';
+  }
+}
+
 export const performanceService = {
   // Load all transaction and price data needed for history calculations
   async _loadPriceTimelines(endDateStr: string, allowedAssetIds?: Set<string>) {
@@ -227,6 +323,7 @@ export const performanceService = {
     const currentPrices = new Map(assets.map((a) => [a.id, a.currentPrice ?? 0]));
     const currencyMap = new Map(assets.map((a) => [a.id, a.currency || 'INR']));
     const assetClassMap = new Map(assets.map((a) => [a.id, a.assetClass]));
+    const symbolMap = new Map(assets.map((a) => [a.id, a.symbol]));
 
     const priceHistoryRecords = await db
       .select()
@@ -269,7 +366,7 @@ export const performanceService = {
       );
     }
 
-    return { transactions, priceTimeline, currentPrices, currencyMap, assetClassMap };
+    return { transactions, priceTimeline, currentPrices, currencyMap, assetClassMap, symbolMap };
   },
 
   // Calculate portfolio value (in INR) from positions and price timelines at a given date
@@ -293,6 +390,99 @@ export const performanceService = {
       total += value;
     }
     return total;
+  },
+
+  _calcPortfolioValueByCategory(
+    positions: Map<string, number>,
+    priceTimeline: Map<string, { date: string; price: number }[]>,
+    date: string,
+    currencyMap: Map<string, string>,
+    assetClassMap: Map<string, string>,
+    symbolMap: Map<string, string>,
+    usdToInr: number | null,
+    dimension: AllocDimension
+  ): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [assetId, quantity] of positions) {
+      if (quantity <= 0) continue;
+      const price = getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
+      const cur = currencyMap.get(assetId) ?? 'INR';
+      let value = toInr(quantity * price, cur, usdToInr);
+      if (PHYSICAL_METAL_CLASSES.has(assetClassMap.get(assetId) ?? '')) {
+        value *= METAL_SELL_FACTOR;
+      }
+      const label = getDimensionLabel(dimension, assetClassMap.get(assetId) ?? '', symbolMap.get(assetId) ?? '', cur);
+      result[label] = (result[label] ?? 0) + value;
+    }
+    return result;
+  },
+
+  async buildValueHistoryByDimension(
+    interval: TimeInterval,
+    dimension: AllocDimension
+  ): Promise<{ series: { date: string; total: number; [key: string]: number | string }[] }> {
+    const endDate = new Date();
+    const endDateStr = dateToLocal(endDate);
+
+    let startDate: Date | null = getStartDate(interval);
+    if (!startDate) {
+      const firstTxDate = await getFirstTransactionDate();
+      startDate = firstTxDate ? new Date(firstTxDate) : new Date();
+    }
+    const startDateStr = dateToLocal(startDate);
+
+    const { transactions, priceTimeline, currencyMap, assetClassMap, symbolMap } =
+      await this._loadPriceTimelines(endDateStr);
+
+    if (transactions.length === 0) return { series: [] };
+
+    const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
+    const usdToInr = rateResult?.rate ?? null;
+
+    const firstTxDate = transactions[0].transactionDate;
+    const includesInception = startDateStr <= firstTxDate;
+
+    const positions = new Map<string, number>();
+    let txIdx = 0;
+
+    while (txIdx < transactions.length && transactions[txIdx].transactionDate < startDateStr) {
+      const tx = transactions[txIdx];
+      if (tx.type === 'buy') {
+        positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) + tx.quantity);
+      } else {
+        positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) - tx.quantity);
+      }
+      txIdx++;
+    }
+
+    const effectiveStart = includesInception ? firstTxDate : startDateStr;
+    const sampleDates = generateSampleDates(effectiveStart, endDateStr, interval);
+    const series: { date: string; total: number; [key: string]: number | string }[] = [];
+
+    for (const sampleDate of sampleDates) {
+      while (txIdx < transactions.length && transactions[txIdx].transactionDate <= sampleDate) {
+        const tx = transactions[txIdx];
+        if (tx.type === 'buy') {
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) + tx.quantity);
+        } else {
+          positions.set(tx.assetId, (positions.get(tx.assetId) ?? 0) - tx.quantity);
+        }
+        txIdx++;
+      }
+
+      const byCategory = this._calcPortfolioValueByCategory(
+        positions, priceTimeline, sampleDate,
+        currencyMap, assetClassMap, symbolMap, usdToInr, dimension
+      );
+
+      let total = 0;
+      for (const v of Object.values(byCategory)) total += v;
+      if (total > 0) {
+        series.push({ date: sampleDate, total, ...byCategory });
+      }
+    }
+
+    return { series };
   },
 
   /**

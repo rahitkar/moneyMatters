@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { transactionService } from '../services/transaction.service.js';
 import { assetService } from '../services/asset.service.js';
 import { TRANSACTION_TYPES } from '../db/schema.js';
+import { getDayChanges } from '../services/portfolio.service.js';
 
 const createTransactionSchema = z.object({
   assetId: z.string().min(1),
@@ -51,6 +52,9 @@ export async function transactionRoutes(fastify: FastifyInstance) {
     const positions = await transactionService.getAllPositions();
     return { positions };
   });
+
+  // Day change for each asset: previous close vs current price
+  fastify.get('/positions/day-changes', async () => getDayChanges());
 
   // Get position for a specific asset
   fastify.get<{ Params: { assetId: string } }>(

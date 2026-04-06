@@ -178,7 +178,6 @@ export default function CashFlow() {
   const [openingBalanceInput, setOpeningBalanceInput] = useState('');
   const [expenseLimitInput, setExpenseLimitInput] = useState('');
   const [investmentTargetInput, setInvestmentTargetInput] = useState('');
-  const [savingsTargetInput, setSavingsTargetInput] = useState('');
 
   const upsertConfig = useUpsertMonthConfig();
   const initMonth = useInitMonth();
@@ -293,7 +292,6 @@ export default function CashFlow() {
                   openingBalance: openingBalanceInput ? parseFloat(openingBalanceInput) : undefined,
                   expenseLimit: expenseLimitInput ? parseFloat(expenseLimitInput) : undefined,
                   investmentTarget: investmentTargetInput ? parseFloat(investmentTargetInput) : undefined,
-                  savingsTarget: savingsTargetInput ? parseFloat(savingsTargetInput) : undefined,
                 });
                 setEditingConfig(false);
               }}
@@ -314,11 +312,6 @@ export default function CashFlow() {
                   <input type="number" value={investmentTargetInput} onChange={(e) => setInvestmentTargetInput(e.target.value)} placeholder="Min investment"
                     className="w-32 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500" />
                 </div>
-                <div>
-                  <label className="block text-[10px] text-surface-500 mb-0.5">Savings Target</label>
-                  <input type="number" value={savingsTargetInput} onChange={(e) => setSavingsTargetInput(e.target.value)} placeholder="Min savings"
-                    className="w-32 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500" />
-                </div>
                 <div className="flex items-end gap-1 pt-4">
                   <button type="submit" className="btn btn-primary text-xs px-3 py-1.5">Save</button>
                   <button type="button" onClick={() => setEditingConfig(false)} className="text-surface-500 hover:text-surface-300">
@@ -334,7 +327,6 @@ export default function CashFlow() {
                   setOpeningBalanceInput(summary?.income.openingBalanceAutoCarried ? '' : String(summary?.income.openingBalance ?? ''));
                   setExpenseLimitInput(String(summary?.income.expenseLimit ?? ''));
                   setInvestmentTargetInput(String(summary?.income.investmentTarget ?? ''));
-                  setSavingsTargetInput(String(summary?.income.savingsTarget ?? ''));
                   setEditingConfig(true);
                 }}
                 className="text-surface-100 font-semibold hover:text-brand-400 transition-colors flex items-center gap-2"
@@ -431,37 +423,6 @@ export default function CashFlow() {
               variant="negative"
             />
           </div>
-
-          {/* Monthly Targets */}
-          {(summary.income.expenseLimit || summary.income.investmentTarget || summary.income.savingsTarget) && (
-            <Card padding="sm">
-              <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Monthly Targets</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {summary.income.expenseLimit != null && summary.income.expenseLimit > 0 && (
-                  <TargetProgressBar
-                    label="Expense Limit"
-                    actual={summary.totals.totalExpenses}
-                    target={summary.income.expenseLimit}
-                    invertColor
-                  />
-                )}
-                {summary.income.investmentTarget != null && summary.income.investmentTarget > 0 && (
-                  <TargetProgressBar
-                    label="Investment Target"
-                    actual={summary.totals.totalInvested}
-                    target={summary.income.investmentTarget}
-                  />
-                )}
-                {summary.income.savingsTarget != null && summary.income.savingsTarget > 0 && (
-                  <TargetProgressBar
-                    label="Savings Target"
-                    actual={summary.waterfall.savings}
-                    target={summary.income.savingsTarget}
-                  />
-                )}
-              </div>
-            </Card>
-          )}
 
           {/* Add Spend Form */}
           {categories && categories.length > 0 && paymentMethods && paymentMethods.length > 0 && (
@@ -862,34 +823,6 @@ export default function CashFlow() {
 }
 
 // ── Target Progress Bar ──────────────────────────────────────────
-
-function TargetProgressBar({ label, actual, target, invertColor }: {
-  label: string;
-  actual: number;
-  target: number;
-  invertColor?: boolean;
-}) {
-  const pct = target > 0 ? Math.min((actual / target) * 100, 150) : 0;
-  const isGood = invertColor ? actual <= target : actual >= target;
-
-  return (
-    <div>
-      <div className="flex items-center justify-between text-xs mb-1">
-        <span className="text-surface-400">{label}</span>
-        <span className={clsx('font-medium tabular-nums', isGood ? 'text-green-400' : 'text-red-400')}>
-          {formatCurrency(actual, 'INR')} / {formatCurrency(target, 'INR')}
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-surface-800 overflow-hidden">
-        <div
-          className={clsx('h-full rounded-full transition-all', isGood ? 'bg-green-500' : 'bg-red-500')}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-      <div className="text-[10px] text-surface-600 mt-0.5 text-right">{pct.toFixed(0)}%</div>
-    </div>
-  );
-}
 
 // ── Cycle Settings Modal ─────────────────────────────────────────
 

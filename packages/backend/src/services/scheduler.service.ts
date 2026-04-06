@@ -5,27 +5,11 @@ import { performanceService } from './performance.service.js';
 import { benchmarkService } from './benchmark.service.js';
 import { db, schema } from '../db/index.js';
 
-let priceUpdateTask: cron.ScheduledTask | null = null;
 let snapshotTask: cron.ScheduledTask | null = null;
 
 export function startPriceUpdateScheduler() {
-  // Update prices every 15 minutes during market hours (9 AM - 5 PM UTC, Monday-Friday)
-  priceUpdateTask = cron.schedule('*/15 9-17 * * 1-5', async () => {
-    console.log('Running scheduled price update...');
-    try {
-      const result = await marketDataService.updateAllPrices();
-      console.log(`Price update complete: ${result.updated} updated, ${result.failed} failed`);
-      
-      // Also update benchmark prices
-      const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
-      console.log(`Benchmark update complete: ${benchmarkResult.updated} updated, ${benchmarkResult.failed} failed`);
-    } catch (error) {
-      console.error('Price update error:', error);
-    }
-  });
-
-  // Take daily portfolio snapshot at end of day (6 PM UTC)
-  snapshotTask = cron.schedule('0 18 * * 1-5', async () => {
+  // Take daily portfolio snapshot after US market close (9:30 PM UTC = 3 AM IST / 5:30 PM EDT)
+  snapshotTask = cron.schedule('30 21 * * 1-5', async () => {
     console.log('Taking daily portfolio snapshot...');
     try {
       const snapshot = await performanceService.takeSnapshot();
@@ -37,24 +21,21 @@ export function startPriceUpdateScheduler() {
     }
   });
 
-  // Also run immediately on startup
+  // Fetch latest prices + snapshot on startup
   setTimeout(async () => {
-    console.log('Running initial price update...');
+    console.log('Running startup price update...');
     try {
       const result = await marketDataService.updateAllPrices();
-      console.log(`Initial price update complete: ${result.updated} updated, ${result.failed} failed`);
-      
-      // Take initial snapshot
+      console.log(`Startup price update: ${result.updated} updated, ${result.failed} failed`);
+
+      const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
+      console.log(`Startup benchmark update: ${benchmarkResult.updated} updated, ${benchmarkResult.failed} failed`);
+
       const snapshot = await performanceService.takeSnapshot();
       if (snapshot) {
-        console.log(`Initial snapshot taken: Value=${snapshot.totalValue}`);
+        console.log(`Startup snapshot: Value=${snapshot.totalValue}`);
       }
 
-      // Update benchmark prices
-      const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
-      console.log(`Initial benchmark update: ${benchmarkResult.updated} updated`);
-
-      // Auto-backfill historical prices if price_history is sparse
       const [{ cnt }] = await db
         .select({ cnt: sql<number>`COUNT(*)` })
         .from(schema.priceHistory)
@@ -62,16 +43,15 @@ export function startPriceUpdateScheduler() {
       if (cnt < 100) {
         console.log(`Price history sparse (${cnt} records), triggering backfill...`);
         const backfillResult = await marketDataService.backfillHistoricalPrices();
-        console.log(`Backfill complete: ${backfillResult.updated} assets filled, ${backfillResult.skipped} skipped, ${backfillResult.failed} failed`);
+        console.log(`Backfill complete: ${backfillResult.updated} filled, ${backfillResult.skipped} skipped, ${backfillResult.failed} failed`);
       }
 
-      // Auto-backfill benchmark historical data for any sparse benchmarks
       const bmResult = await benchmarkService.backfillAllBenchmarks();
       if (bmResult.updated > 0) {
         console.log(`Benchmark backfill: ${bmResult.updated} filled, ${bmResult.skipped} skipped, ${bmResult.failed} failed`);
       }
     } catch (error) {
-      console.error('Initial update error:', error);
+      console.error('Startup update error:', error);
     }
   }, 5000);
 
@@ -79,10 +59,6 @@ export function startPriceUpdateScheduler() {
 }
 
 export function stopPriceUpdateScheduler() {
-  if (priceUpdateTask) {
-    priceUpdateTask.stop();
-    priceUpdateTask = null;
-  }
   if (snapshotTask) {
     snapshotTask.stop();
     snapshotTask = null;

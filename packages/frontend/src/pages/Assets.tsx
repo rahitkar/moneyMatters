@@ -51,7 +51,9 @@ import {
   useExchangeRate,
   useApplyStockSplit,
   usePortfolioSummary,
+  useDayChanges,
 } from '../api/hooks';
+import type { DayChangeMap } from '../api/hooks';
 import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime } from '../lib/format';
 import type { AssetClass, Provider, Tag, SearchResult, Position, TransactionWithAsset } from '../api/types';
 
@@ -253,10 +255,10 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: 'external_portfolio', label: 'External Portfolio' },
 ];
 
-type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent' | 'weight';
+type SortField = 'symbol' | 'name' | 'assetClass' | 'quantity' | 'averageCost' | 'currentPrice' | 'invested' | 'currentValue' | 'pnl' | 'pnlPercent' | 'dayChange' | 'weight';
 type SortDirection = 'asc' | 'desc';
 
-function compareFn(a: Position, b: Position, field: SortField, dir: SortDirection, usdToInr: number | null): number {
+function compareFn(a: Position, b: Position, field: SortField, dir: SortDirection, usdToInr: number | null, dayChanges?: DayChangeMap): number {
   const inr = (v: number, cur: string) => toInr(v, cur, usdToInr);
   let cmp = 0;
   switch (field) {
@@ -289,6 +291,9 @@ function compareFn(a: Position, b: Position, field: SortField, dir: SortDirectio
       break;
     case 'pnlPercent':
       cmp = a.unrealizedGainPercent - b.unrealizedGainPercent;
+      break;
+    case 'dayChange':
+      cmp = (dayChanges?.[a.assetId]?.dayChangeValue ?? 0) - (dayChanges?.[b.assetId]?.dayChangeValue ?? 0);
       break;
     case 'weight':
       cmp = inr(a.currentValue, a.currency) - inr(b.currentValue, b.currency);
@@ -395,6 +400,8 @@ export default function Assets() {
   const { data: allAssets } = useAssets();
   const { data: tags } = useTags();
   const { data: summary } = usePortfolioSummary();
+  const { data: dayChangesResp } = useDayChanges();
+  const dayChanges = dayChangesResp?.dayChanges;
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = summary?.usdToInr ?? usdInrRate?.rate ?? null;
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -467,8 +474,8 @@ export default function Assets() {
         }
         return matchesSelection(p, selectedPrimaries, selectedSubs) && matchesColFilters(p, colFilter, assetTagMap);
       })
-      .sort((a, b) => compareFn(a, b, sortField, sortDir, usdToInr));
-  }, [positions, selectedPrimaries, selectedSubs, sortField, sortDir, colFilter, assetTagMap, usdToInr, dimensionFilter]);
+      .sort((a, b) => compareFn(a, b, sortField, sortDir, usdToInr, dayChanges ?? undefined));
+  }, [positions, selectedPrimaries, selectedSubs, sortField, sortDir, colFilter, assetTagMap, usdToInr, dimensionFilter, dayChanges]);
 
   const activeFilterCount = useMemo(() => {
     let count = selectedPrimaries.size + selectedSubs.size;
@@ -534,6 +541,8 @@ export default function Assets() {
     // When unfiltered, use server-computed summary for consistent values with Dashboard
     if (!isFiltered && summary) {
       const rate = summary.usdToInr;
+      const totalDayChange = dayChangesResp?.totalDayChange ?? 0;
+      const totalDayChangePct = dayChangesResp?.totalDayChangePercent ?? 0;
       return {
         invested: summary.totalCost,
         current: summary.totalValue,
@@ -542,6 +551,8 @@ export default function Assets() {
         investedUsd: rate ? summary.totalCost / rate : null,
         currentUsd: rate ? summary.totalValue / rate : null,
         pnlUsd: rate ? summary.totalGain / rate : null,
+        totalDayChange,
+        totalDayChangePct,
       };
     }
 
@@ -556,8 +567,18 @@ export default function Assets() {
     const investedUsd = usdToInr ? invested / usdToInr : null;
     const currentUsd = usdToInr ? current / usdToInr : null;
     const pnlUsd = usdToInr ? pnl / usdToInr : null;
-    return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd };
-  }, [filteredPositions, usdToInr, isFiltered, summary]);
+
+    let totalDayChange = 0;
+    if (dayChanges) {
+      for (const p of filteredPositions) {
+        const dc = dayChanges[p.assetId];
+        if (dc) totalDayChange += dc.dayChangeValue;
+      }
+    }
+    const totalDayChangePct = current > 0 ? (totalDayChange / (current - totalDayChange)) * 100 : 0;
+
+    return { invested, current, pnl, pnlPercent, investedUsd, currentUsd, pnlUsd, totalDayChange, totalDayChangePct };
+  }, [filteredPositions, usdToInr, isFiltered, summary, dayChanges, dayChangesResp]);
 
   const toggleAssetSelection = useCallback((assetId: string) => {
     setSelectedAssets((prev) => {
@@ -646,7 +667,7 @@ export default function Assets() {
             </p>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard
             label="Total Value"
             value={formatCurrency(totals.current, 'INR')}
@@ -669,9 +690,15 @@ export default function Assets() {
             isPositive={totals.pnl >= 0}
           />
           <StatCard
+            label="Day Change"
+            value={`${totals.totalDayChange >= 0 ? '+' : ''}${formatCurrency(totals.totalDayChange, 'INR')}`}
+            subValue={`${totals.totalDayChangePct >= 0 ? '+' : ''}${formatPercent(totals.totalDayChangePct)}`}
+            icon={totals.totalDayChange >= 0 ? ArrowUpRight : ArrowDownRight}
+            isPositive={totals.totalDayChange >= 0}
+          />
+          <StatCard
             label="P&L %"
             value={`${totals.pnlPercent >= 0 ? '+' : ''}${formatPercent(totals.pnlPercent)}`}
-            usdSubValue={`${totals.pnl >= 0 ? '+' : ''}${formatCurrency(totals.pnl, 'INR')}`}
             subValue={`on ${formatCurrency(totals.invested, 'INR')} invested`}
             icon={totals.pnlPercent >= 0 ? TrendingUp : TrendingDown}
             isPositive={totals.pnlPercent >= 0}
@@ -907,16 +934,17 @@ export default function Assets() {
               <colgroup>
                 {bulkSelectMode && <col className="w-8" />}
                 <col className="w-8" />
-                <col style={{ width: '18%' }} />
+                <col style={{ width: '16%' }} />
                 <col className="w-[68px]" />
-                <col style={{ width: '6%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '8%' }} />
                 <col style={{ width: '10%' }} />
                 <col style={{ width: '9%' }} />
-                <col style={{ width: '11%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '7%' }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '6%' }} />
+                <col style={{ width: '5%' }} />
               </colgroup>
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-surface-700 bg-surface-900">
@@ -941,6 +969,7 @@ export default function Assets() {
                   <SortableHeader field="invested" label="Invested" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="pnl" label="P&L" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="pnlPercent" label="P&L%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
+                  <SortableHeader field="dayChange" label="Day Chg" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <SortableHeader field="weight" label="Wt%" current={sortField} dir={sortDir} onSort={handleSort} align="right" />
                   <th className="table-header text-right">Upd.</th>
                 </tr>
@@ -951,6 +980,7 @@ export default function Assets() {
                     <PositionRow
                       position={position}
                       usdToInr={usdToInr}
+                      dayChange={dayChanges?.[position.assetId] ?? null}
                       totalValue={totals?.current ?? 0}
                       isExpanded={expandedAssetId === position.assetId}
                       bulkSelectMode={bulkSelectMode}
@@ -1129,6 +1159,7 @@ function SortableHeader({
 function PositionRow({
   position,
   usdToInr,
+  dayChange,
   totalValue,
   isExpanded,
   bulkSelectMode,
@@ -1143,6 +1174,7 @@ function PositionRow({
 }: {
   position: Position;
   usdToInr: number | null;
+  dayChange: { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number } | null;
   totalValue: number;
   isExpanded: boolean;
   bulkSelectMode: boolean;
@@ -1312,6 +1344,16 @@ function PositionRow({
       <td className={clsx('table-cell text-right tabular-nums font-medium', isPositive ? 'text-green-400' : 'text-red-400')}>
         {isPositive ? '+' : ''}{formatPercent(adjGainPercent)}
       </td>
+      <td className="table-cell text-right tabular-nums text-xs">
+        {dayChange ? (
+          <div className={dayChange.dayChangeValue >= 0 ? 'text-green-400' : 'text-red-400'}>
+            <div className="font-medium">{dayChange.dayChangeValue >= 0 ? '+' : ''}{formatCurrency(dayChange.dayChangeValue, 'INR')}</div>
+            <div className="text-[10px] opacity-70">{dayChange.dayChangePercent >= 0 ? '+' : ''}{formatPercent(dayChange.dayChangePercent)}</div>
+          </div>
+        ) : (
+          <span className="text-surface-500">—</span>
+        )}
+      </td>
       <td className="table-cell text-right tabular-nums text-surface-300 text-xs">
         {totalValue > 0 ? formatPercent((toInr(adjValue, cur, usdToInr) / totalValue) * 100) : '—'}
       </td>
@@ -1340,7 +1382,7 @@ function TransactionRows({
   if (transactions.length === 0) {
     return (
       <tr>
-        <td colSpan={11} className="px-6 py-4">
+        <td colSpan={14} className="px-6 py-4">
           <p className="text-sm text-surface-500 text-center">No transactions found for {symbol}</p>
         </td>
       </tr>
@@ -1350,7 +1392,7 @@ function TransactionRows({
   return (
     <>
       <tr className="bg-surface-800/40">
-        <td colSpan={11} className="px-6 py-2">
+        <td colSpan={14} className="px-6 py-2">
           <div className="mb-2 text-xs font-medium text-surface-500 uppercase tracking-wider">{symbol}</div>
           <div className="overflow-x-auto">
             <table className="w-full">

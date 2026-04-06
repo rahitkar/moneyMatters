@@ -1,8 +1,13 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { performanceService } from '../services/performance.service.js';
+import { performanceService, type AllocDimension } from '../services/performance.service.js';
 import { benchmarkService } from '../services/benchmark.service.js';
 import { TIME_INTERVALS, ASSET_CLASSES } from '../db/schema.js';
+
+const ALLOC_DIMENSIONS: AllocDimension[] = [
+  'bySubCategory', 'byAssetClass', 'byGeography', 'byInstrumentType',
+  'byRiskProfile', 'byCurrency', 'byLiquidity', 'byOwnership',
+];
 
 const intervalSchema = z.enum(TIME_INTERVALS).optional().default('1M');
 
@@ -22,6 +27,19 @@ export async function performanceRoutes(fastify: FastifyInstance) {
       const interval = intervalSchema.parse(request.query.interval);
       const performance = await performanceService.getPortfolioPerformance(interval);
       return { performance };
+    }
+  );
+
+  // Portfolio value history broken down by allocation dimension
+  fastify.get<{ Querystring: { interval?: string; dimension?: string } }>(
+    '/portfolio/breakdown',
+    async (request) => {
+      const interval = intervalSchema.parse(request.query.interval);
+      const dim = (request.query.dimension ?? 'byRiskProfile') as AllocDimension;
+      if (!ALLOC_DIMENSIONS.includes(dim)) {
+        return { series: [] };
+      }
+      return performanceService.buildValueHistoryByDimension(interval, dim);
     }
   );
 

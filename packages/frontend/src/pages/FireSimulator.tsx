@@ -49,6 +49,7 @@ import {
   useFireMonthlyTargets,
   useCashFlowSettings,
   useUpdateCashFlowSettings,
+  useExchangeRate,
 } from '../api/hooks';
 import type { FireSimulationInput, FireSimulationResult, FireSimulationRow, FireComparisonData, FireMonthlyTargetData } from '../api/types';
 
@@ -83,6 +84,14 @@ const yFmt = (v: number) => {
 };
 const tooltipStyle = { backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' };
 
+function fmtUsd(inr: number, rate: number | null): string {
+  if (!rate) return '';
+  const usd = inr / rate;
+  if (Math.abs(usd) >= 1000000) return `$${(usd / 1000000).toFixed(2)}M`;
+  if (Math.abs(usd) >= 1000) return `$${(usd / 1000).toFixed(1)}K`;
+  return `$${usd.toFixed(0)}`;
+}
+
 // ── Page ──────────────────────────────────────────────────────────
 
 function computeAge(dob: string): { years: number; months: number } {
@@ -102,6 +111,8 @@ export default function FireSimulator() {
   const { data: monthlyTargets } = useFireMonthlyTargets();
   const { data: cfSettings } = useCashFlowSettings();
   const updateSettings = useUpdateCashFlowSettings();
+  const { data: usdInrRate } = useExchangeRate('USD', 'INR');
+  const usdToInr = portfolio?.usdToInr ?? usdInrRate?.rate ?? null;
 
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [inputs, setInputs] = useState<FireSimulationInput | null>(null);
@@ -315,6 +326,7 @@ export default function FireSimulator() {
             {comparison.simulations.map((sim, idx) => (
               <ScenarioCard key={sim.id} sim={sim} idx={idx}
                 isActive={activeTab === sim.id && !isCreating}
+                usdToInr={usdToInr}
                 onSelect={() => { setIsCreating(false); setActiveTab(sim.id); }}
                 onSave={(updates) => updateSim.mutate({ id: sim.id, ...updates })}
                 onDelete={() => deleteSim.mutate(sim.id, { onSuccess: () => { setActiveTab(null); setInputs(null); setPreviewResult(null); } })}
@@ -325,7 +337,7 @@ export default function FireSimulator() {
 
         {/* ── Monthly Progress ────────────────────────────────── */}
         {monthlyTargets && monthlyTargets.scenarios.length > 0 && (
-          <MonthlyProgress data={monthlyTargets} />
+          <MonthlyProgress data={monthlyTargets} usdToInr={usdToInr} />
         )}
 
         {/* ── Overlay Chart ──────────────────────────────────── */}
@@ -342,7 +354,9 @@ export default function FireSimulator() {
                   <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#a1a1aa' }}
                     formatter={(v: number | null, name: string) => {
                       if (v == null) return ['—', name];
-                      return [formatCurrency(v, 'INR'), name === 'actual' ? 'Portfolio' : comparison.simulations[parseInt(name.split('_')[1])]?.name ?? name];
+                      const label = name === 'actual' ? 'Portfolio' : comparison.simulations[parseInt(name.split('_')[1])]?.name ?? name;
+                      const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
+                      return [`${formatCurrency(v, 'INR')}${usd}`, label];
                     }}
                     labelFormatter={(_: any, p: any) => { const d = p?.[0]?.payload; return d ? `Age ${d.age} (${d.year})` : ''; }}
                   />
@@ -426,7 +440,11 @@ export default function FireSimulator() {
                       contentStyle={tooltipStyle}
                       labelStyle={{ color: '#a1a1aa' }}
                       labelFormatter={(age) => `Age ${age}${Number(age) === retireAge ? ' (Retire)' : ''}`}
-                      formatter={(v: number | null, name: string) => [v != null ? formatCurrency(v, 'INR') : '—', labels[name] ?? name]}
+                      formatter={(v: number | null, name: string) => {
+                        if (v == null) return ['—', labels[name] ?? name];
+                        const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
+                        return [`${formatCurrency(v, 'INR')}${usd}`, labels[name] ?? name];
+                      }}
                     />
                     <Legend formatter={(v) => labels[v] ?? v} />
                     <ReferenceLine x={retireAge} yAxisId="left" stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: 'FIRE', position: 'top', fill: '#f59e0b', fontSize: 10 }} />
@@ -448,7 +466,7 @@ export default function FireSimulator() {
               <Target className="w-4 h-4 text-surface-400" /> Year-by-Year Simulations
             </h2>
             {comparison.simulations.map((sim, idx) => (
-              <ScenarioTable key={sim.id} sim={sim} idx={idx} defaultOpen={activeTab === sim.id} />
+              <ScenarioTable key={sim.id} sim={sim} idx={idx} defaultOpen={activeTab === sim.id} usdToInr={usdToInr} />
             ))}
           </div>
         )}
@@ -460,7 +478,7 @@ export default function FireSimulator() {
 
 // ── Monthly Progress ─────────────────────────────────────────────
 
-function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
+function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdToInr: number | null }) {
   const currentMonthKey = todayLocal().slice(0, 7);
   const [view, setView] = useState<'corpus' | 'cashflow'>('cashflow');
 
@@ -527,6 +545,7 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
               <div className="rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2.5">
                 <div className="text-[10px] text-surface-500 uppercase tracking-wide mb-1">Investment Target</div>
                 <div className="text-lg font-bold text-blue-400 tabular-nums">{fmtLakh(baseInvTarget)}<span className="text-xs text-surface-500 font-normal"> /mo</span></div>
+                {usdToInr && <div className="text-[10px] text-surface-500">{fmtUsd(baseInvTarget, usdToInr)}/mo</div>}
                 <div className="text-[10px] text-surface-500 mt-0.5">{baseScenario.name}</div>
               </div>
               {(() => {
@@ -538,6 +557,7 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
                     <div className="rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2.5">
                       <div className="text-[10px] text-surface-500 uppercase tracking-wide mb-1">Expenditure Budget</div>
                       <div className="text-lg font-bold text-amber-400 tabular-nums">{income > 0 ? fmtLakh(expBudget) : '—'}<span className="text-xs text-surface-500 font-normal"> /mo</span></div>
+                      {usdToInr && income > 0 && <div className="text-[10px] text-surface-500">{fmtUsd(expBudget, usdToInr)}/mo</div>}
                       <div className="text-[10px] text-surface-500 mt-0.5">Income − Investment</div>
                     </div>
                     <div className="rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2.5">
@@ -545,6 +565,7 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
                       <div className={clsx('text-lg font-bold tabular-nums', (curMonth?.actualInvestment ?? 0) >= baseInvTarget ? 'text-green-400' : 'text-red-400')}>
                         {fmtLakh(curMonth?.actualInvestment ?? 0)}
                       </div>
+                      {usdToInr && <div className="text-[10px] text-surface-500">{fmtUsd(curMonth?.actualInvestment ?? 0, usdToInr)}</div>}
                       <div className="text-[10px] text-surface-500 mt-0.5">This month's buys</div>
                     </div>
                   </>
@@ -572,7 +593,8 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
                       actualInvestment: 'Saved',
                       actualExpenditure: 'Actual Expenditure',
                     };
-                    return [formatCurrency(v, 'INR'), labels[name] ?? name];
+                    const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
+                    return [`${formatCurrency(v, 'INR')}${usd}`, labels[name] ?? name];
                   }}
                 />
                 <Legend
@@ -733,9 +755,10 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
                   labelStyle={{ color: '#a1a1aa' }}
                   formatter={(v: number | null, name: string) => {
                     if (v == null) return ['—', name];
-                    if (name === 'actual') return [formatCurrency(v, 'INR'), 'Actual Portfolio'];
+                    const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
+                    if (name === 'actual') return [`${formatCurrency(v, 'INR')}${usd}`, 'Actual Portfolio'];
                     const idx = parseInt(name.split('_')[1]);
-                    return [formatCurrency(v, 'INR'), data.scenarios[idx]?.name ?? name];
+                    return [`${formatCurrency(v, 'INR')}${usd}`, data.scenarios[idx]?.name ?? name];
                   }}
                 />
                 <Legend
@@ -844,8 +867,9 @@ function MonthlyProgress({ data }: { data: FireMonthlyTargetData }) {
 
 // ── Scenario Card with Editable Params ───────────────────────────
 
-function ScenarioCard({ sim, idx, isActive, onSelect, onSave, onDelete }: {
+function ScenarioCard({ sim, idx, isActive, usdToInr, onSelect, onSave, onDelete }: {
   sim: FireComparisonData['simulations'][number]; idx: number; isActive: boolean;
+  usdToInr: number | null;
   onSelect: () => void;
   onSave: (updates: Partial<FireSimulationInput>) => void;
   onDelete: () => void;
@@ -872,16 +896,16 @@ function ScenarioCard({ sim, idx, isActive, onSelect, onSave, onDelete }: {
   const set = (k: keyof FireSimulationInput, v: number) => setDraft((d) => ({ ...d, [k]: v }));
 
   const params = [
-    { label: 'Retire At', key: 'retirementAge' as const, val: s.retirementAge, suffix: ' yrs', fmt: (v: number) => `Age ${v}` },
-    { label: 'Monthly Expense', key: 'postRetirementMonthlyExpense' as const, val: s.postRetirementMonthlyExpense, prefix: '₹', fmt: (v: number) => fmtLakh(v) },
-    { label: 'Monthly Saving', key: 'monthlySaving' as const, val: s.monthlySaving, prefix: '₹', fmt: (v: number) => fmtLakh(v) },
-    { label: 'Savings Increase', key: 'annualSavingsIncrease' as const, val: s.annualSavingsIncrease, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v) },
-    { label: 'ROI (Pre-Tax)', key: 'returnOnInvestment' as const, val: s.returnOnInvestment, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v) },
-    { label: 'Capital Gain Tax', key: 'capitalGainTax' as const, val: s.capitalGainTax, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v) },
-    { label: 'Current Savings', key: 'currentSavings' as const, val: s.currentSavings, prefix: '₹', fmt: (v: number) => fmtLakh(v) },
-    { label: 'Inflation', key: 'inflationRate' as const, val: s.inflationRate, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v) },
-    { label: 'Start Year', key: 'startYear' as const, val: s.startYear, fmt: (v: number) => String(v) },
-    { label: 'Life Expectancy', key: 'lifeExpectancy' as const, val: s.lifeExpectancy, suffix: ' yrs', fmt: (v: number) => `${v} yrs` },
+    { label: 'Retire At', key: 'retirementAge' as const, val: s.retirementAge, suffix: ' yrs', fmt: (v: number) => `Age ${v}`, isCurrency: false },
+    { label: 'Monthly Expense', key: 'postRetirementMonthlyExpense' as const, val: s.postRetirementMonthlyExpense, prefix: '₹', fmt: (v: number) => fmtLakh(v), isCurrency: true },
+    { label: 'Monthly Saving', key: 'monthlySaving' as const, val: s.monthlySaving, prefix: '₹', fmt: (v: number) => fmtLakh(v), isCurrency: true },
+    { label: 'Savings Increase', key: 'annualSavingsIncrease' as const, val: s.annualSavingsIncrease, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v), isCurrency: false },
+    { label: 'ROI (Pre-Tax)', key: 'returnOnInvestment' as const, val: s.returnOnInvestment, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v), isCurrency: false },
+    { label: 'Capital Gain Tax', key: 'capitalGainTax' as const, val: s.capitalGainTax, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v), isCurrency: false },
+    { label: 'Current Savings', key: 'currentSavings' as const, val: s.currentSavings, prefix: '₹', fmt: (v: number) => fmtLakh(v), isCurrency: true },
+    { label: 'Inflation', key: 'inflationRate' as const, val: s.inflationRate, suffix: '%', pct: true, fmt: (v: number) => pctDisplay(v), isCurrency: false },
+    { label: 'Start Year', key: 'startYear' as const, val: s.startYear, fmt: (v: number) => String(v), isCurrency: false },
+    { label: 'Life Expectancy', key: 'lifeExpectancy' as const, val: s.lifeExpectancy, suffix: ' yrs', fmt: (v: number) => `${v} yrs`, isCurrency: false },
   ];
 
   return (
@@ -923,6 +947,7 @@ function ScenarioCard({ sim, idx, isActive, onSelect, onSave, onDelete }: {
         <div>
           <div className="text-[10px] text-surface-500 mb-0.5">Corpus</div>
           <div className="text-lg font-bold tabular-nums text-green-400">{fmtLakh(corpus)}</div>
+          {usdToInr && <div className="text-[10px] text-surface-500 font-medium">{fmtUsd(corpus, usdToInr)}</div>}
           <div className="text-[10px] text-surface-500">at retirement</div>
         </div>
         <div>
@@ -948,7 +973,10 @@ function ScenarioCard({ sim, idx, isActive, onSelect, onSave, onDelete }: {
                   className="w-20 text-right text-[11px] tabular-nums px-1.5 py-0.5 rounded bg-surface-700 border border-surface-600 text-surface-100 focus:outline-none focus:border-brand-500"
                 />
               ) : (
-                <span className="text-[11px] tabular-nums text-surface-300 font-medium">{p.fmt(p.val)}</span>
+                <span className="text-[11px] tabular-nums text-surface-300 font-medium">
+                  {p.fmt(p.val)}
+                  {p.isCurrency && usdToInr && <span className="text-[9px] text-surface-500 ml-1">{fmtUsd(p.val, usdToInr)}</span>}
+                </span>
               )}
             </div>
           ))}
@@ -960,8 +988,8 @@ function ScenarioCard({ sim, idx, isActive, onSelect, onSave, onDelete }: {
 
 // ── Collapsible Scenario Table ───────────────────────────────────
 
-function ScenarioTable({ sim, idx, defaultOpen = false }: {
-  sim: FireComparisonData['simulations'][number]; idx: number; defaultOpen?: boolean;
+function ScenarioTable({ sim, idx, defaultOpen = false, usdToInr }: {
+  sim: FireComparisonData['simulations'][number]; idx: number; defaultOpen?: boolean; usdToInr: number | null;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const corpus = getCorpusAtRetirement(sim.rows);
@@ -976,7 +1004,7 @@ function ScenarioTable({ sim, idx, defaultOpen = false }: {
         <span className="text-sm text-surface-100 font-semibold">{sim.name}</span>
         <div className="ml-auto flex items-center gap-5 text-[11px] text-surface-500">
           <span>Retire <span className="text-surface-300 font-medium">@{sim.simulation.retirementAge}</span></span>
-          <span>Corpus <span className="text-green-400 font-medium">{fmtLakh(corpus)}</span></span>
+          <span>Corpus <span className="text-green-400 font-medium">{fmtLakh(corpus)}{usdToInr && <span className="text-surface-500 font-normal ml-1">({fmtUsd(corpus, usdToInr)})</span>}</span></span>
           <span>Lasts <span className={clsx('font-medium', fundsAge >= sim.simulation.lifeExpectancy ? 'text-green-400' : 'text-red-400')}>{fundsAge}+</span></span>
         </div>
       </button>
@@ -992,7 +1020,7 @@ function ScenarioTable({ sim, idx, defaultOpen = false }: {
               </tr>
             </thead>
             <tbody>
-              {sim.rows.map((row) => <SimRow key={row.year} row={row} />)}
+              {sim.rows.map((row) => <SimRow key={row.year} row={row} usdToInr={usdToInr} />)}
             </tbody>
           </table>
         </div>
@@ -1021,10 +1049,11 @@ function InputField({ label, value, onChange, type = 'number', prefix, suffix }:
 
 // ── Table Row ────────────────────────────────────────────────────
 
-function SimRow({ row }: { row: FireSimulationRow }) {
+function SimRow({ row, usdToInr }: { row: FireSimulationRow; usdToInr: number | null }) {
   const isRet = row.status === 'retired_here';
   const isOut = row.status === 'out_of_funds';
   const isDead = row.status === 'dead';
+  const usdSub = (v: number) => usdToInr ? <span className="block text-[9px] text-surface-600">{fmtUsd(v, usdToInr)}</span> : null;
 
   return (
     <tr className={clsx('border-b border-surface-800/40 transition-colors',
@@ -1033,19 +1062,19 @@ function SimRow({ row }: { row: FireSimulationRow }) {
       <td className="py-1.5 px-2.5 text-surface-400 font-medium">{row.year}</td>
       <td className="py-1.5 px-2.5 text-surface-300">{row.age}</td>
       <td className={clsx('py-1.5 px-2.5 text-right tabular-nums font-medium', row.corpusStart < 0 ? 'text-red-400' : 'text-surface-100')}>
-        {fmtLakh(row.corpusStart)}
+        {fmtLakh(row.corpusStart)}{usdSub(row.corpusStart)}
       </td>
       <td className="py-1.5 px-2.5 text-right tabular-nums text-green-400/80">
-        {row.savings > 0 ? fmtLakh(row.savings) : '—'}
+        {row.savings > 0 ? <>{fmtLakh(row.savings)}{usdSub(row.savings)}</> : '—'}
       </td>
       <td className="py-1.5 px-2.5 text-right tabular-nums text-blue-400/80">
-        {row.returnOnInvestment > 0 ? fmtLakh(row.returnOnInvestment) : '—'}
+        {row.returnOnInvestment > 0 ? <>{fmtLakh(row.returnOnInvestment)}{usdSub(row.returnOnInvestment)}</> : '—'}
       </td>
       <td className="py-1.5 px-2.5 text-right tabular-nums text-red-400/80">
-        {row.withdrawals > 0 ? fmtLakh(row.withdrawals) : '—'}
+        {row.withdrawals > 0 ? <>{fmtLakh(row.withdrawals)}{usdSub(row.withdrawals)}</> : '—'}
       </td>
       <td className="py-1.5 px-2.5 text-right tabular-nums text-surface-500">
-        {row.monthlySaving > 0 ? fmtLakh(row.monthlySaving) : '—'}
+        {row.monthlySaving > 0 ? <>{fmtLakh(row.monthlySaving)}{usdSub(row.monthlySaving)}</> : '—'}
       </td>
       <td className="py-1.5 px-2.5 text-center">
         <StatusBadge status={row.status} />

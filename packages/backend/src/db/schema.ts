@@ -42,7 +42,7 @@ export const TRANSACTION_TYPES = ['buy', 'sell'] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
 // Time intervals for performance
-export const TIME_INTERVALS = ['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL', 'CUSTOM'] as const;
+export const TIME_INTERVALS = ['1D', '5D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL', 'CUSTOM'] as const;
 export type TimeInterval = (typeof TIME_INTERVALS)[number];
 
 // Assets table - stores unique assets (e.g., AAPL, BTC)

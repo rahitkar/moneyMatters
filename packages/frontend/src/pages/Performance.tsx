@@ -29,7 +29,7 @@ import type { TimeInterval } from '../api/types';
 
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
   { value: '1D', label: '1D' },
-  { value: '1W', label: '1W' },
+  { value: '5D', label: '5D' },
   { value: '1M', label: '1M' },
   { value: '3M', label: '3M' },
   { value: '6M', label: '6M' },

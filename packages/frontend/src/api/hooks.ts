@@ -463,6 +463,17 @@ export function usePositions() {
   });
 }
 
+export type DayChangeMap = Record<string, { previousPrice: number; dayChange: number; dayChangePercent: number; dayChangeValue: number }>;
+export interface DayChangesResponse { dayChanges: DayChangeMap; totalDayChange: number; totalDayChangePercent: number }
+
+export function useDayChanges() {
+  return useQuery({
+    queryKey: ['day-changes'],
+    queryFn: () => api.get<DayChangesResponse>('/transactions/positions/day-changes'),
+    refetchInterval: 1000 * 60 * 5,
+  });
+}
+
 export function usePosition(assetId: string) {
   return useQuery({
     queryKey: queryKeys.position(assetId),
@@ -545,6 +556,18 @@ export function usePortfolioPerformance(interval: TimeInterval = '1M') {
     queryKey: queryKeys.performance(interval),
     queryFn: () =>
       api.get<{ performance: PortfolioPerformance }>(`/performance/portfolio?interval=${interval}`).then((r) => r.performance),
+  });
+}
+
+export type AllocDimension = 'bySubCategory' | 'byAssetClass' | 'byGeography' | 'byInstrumentType' | 'byRiskProfile' | 'byCurrency' | 'byLiquidity' | 'byOwnership';
+
+export function usePortfolioBreakdown(interval: TimeInterval = '1M', dimension: AllocDimension = 'byRiskProfile') {
+  return useQuery({
+    queryKey: ['portfolio-breakdown', interval, dimension],
+    queryFn: () =>
+      api.get<{ series: Record<string, number | string>[] }>(
+        `/performance/portfolio/breakdown?interval=${interval}&dimension=${dimension}`
+      ).then((r) => r.series),
   });
 }
 

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import { existsSync, mkdirSync } from 'fs';
@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 }
 
 // Create SQLite connection
-const sqlite = new Database(DB_PATH);
+export const sqlite: DatabaseType = new Database(DB_PATH);
 sqlite.pragma('journal_mode = WAL');
 
 // Create Drizzle instance
