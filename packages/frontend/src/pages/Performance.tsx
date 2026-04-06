@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Download, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Download, Activity, ArrowUpRight, ArrowDownRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
@@ -23,6 +23,7 @@ import {
   useRealizedGainsTotal,
   useExchangeRate,
   useBackfillPrices,
+  useDayChanges,
 } from '../api/hooks';
 import { formatCurrency, formatNumber, formatPercent, formatDate } from '../lib/format';
 import type { TimeInterval } from '../api/types';
@@ -96,10 +97,71 @@ export default function Performance() {
     queryStartDate, queryEndDate
   );
   const { data: assetClassPerf } = usePerformanceByAssetClass(queryInterval === 'CUSTOM' ? 'ALL' : queryInterval);
+  const { data: fiveDayComparison } = usePerformanceComparison('5D', appliedBenchmarks, ['all']);
   const { data: realizedGains } = useRealizedGainsTotal();
+  const { data: dayChangesResp } = useDayChanges();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = usdInrRate?.rate ?? null;
   const backfillPrices = useBackfillPrices();
+
+  type AcSortCol = 'value' | 'pnl' | 'realized';
+  const [acSortCol, setAcSortCol] = useState<AcSortCol>('value');
+  const [acSortDir, setAcSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleAcSort = (col: AcSortCol) => {
+    if (acSortCol === col) {
+      setAcSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setAcSortCol(col);
+      setAcSortDir('desc');
+    }
+  };
+
+  const sortedAssetClassPerf = useMemo(() => {
+    if (!assetClassPerf) return [];
+    const copy = [...assetClassPerf];
+    const dir = acSortDir === 'asc' ? 1 : -1;
+    copy.sort((a, b) => {
+      switch (acSortCol) {
+        case 'value': return (a.currentValue - b.currentValue) * dir;
+        case 'pnl': return (a.performance.percentageReturn - b.performance.percentageReturn) * dir;
+        case 'realized': return (a.performance.realizedGains - b.performance.realizedGains) * dir;
+      }
+    });
+    return copy;
+  }, [assetClassPerf, acSortCol, acSortDir]);
+
+  const fiveDayReturns = useMemo(() => {
+    if (!fiveDayComparison) return null;
+    const { portfolio, benchmarks } = fiveDayComparison;
+    const navHistory = portfolio.navHistory ?? [];
+    if (navHistory.length < 2) return null;
+
+    const dates: string[] = [];
+    const portfolioReturns: number[] = [];
+    for (let i = 1; i < navHistory.length; i++) {
+      dates.push(navHistory[i].date);
+      portfolioReturns.push(((navHistory[i].nav - navHistory[i - 1].nav) / navHistory[i - 1].nav) * 100);
+    }
+
+    const benchmarkDailyReturns = benchmarks.map((b) => {
+      const priceMap = new Map(b.priceHistory.map((p) => [p.date, p.price]));
+      const returns: (number | null)[] = [];
+      for (let i = 0; i < dates.length; i++) {
+        const currPrice = priceMap.get(dates[i]);
+        const prevDate = i === 0 ? navHistory[0].date : dates[i - 1];
+        const prevPrice = priceMap.get(prevDate);
+        if (currPrice != null && prevPrice != null && prevPrice > 0) {
+          returns.push(((currPrice - prevPrice) / prevPrice) * 100);
+        } else {
+          returns.push(null);
+        }
+      }
+      return { symbol: b.symbol, name: b.name, returns };
+    });
+
+    return { dates, portfolioReturns, benchmarkDailyReturns };
+  }, [fiveDayComparison]);
 
   const hasDraftChanges =
     JSON.stringify(draftBenchmarks.slice().sort()) !== JSON.stringify(appliedBenchmarks.slice().sort()) ||
@@ -261,7 +323,15 @@ export default function Performance() {
         </p>
       )}
       {comparison && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <StatCard
+            label="Day Change"
+            value={`${(dayChangesResp?.totalDayChange ?? 0) >= 0 ? '+' : ''}${formatCurrency(dayChangesResp?.totalDayChange ?? 0, 'INR')}`}
+            usdSubValue={usdToInr ? `${(dayChangesResp?.totalDayChange ?? 0) >= 0 ? '+' : ''}${formatCurrency((dayChangesResp?.totalDayChange ?? 0) / usdToInr, 'USD')}` : undefined}
+            subValue={`${(dayChangesResp?.totalDayChangePercent ?? 0) >= 0 ? '+' : ''}${formatPercent(dayChangesResp?.totalDayChangePercent ?? 0)}`}
+            icon={(dayChangesResp?.totalDayChange ?? 0) >= 0 ? ArrowUpRight : ArrowDownRight}
+            isPositive={(dayChangesResp?.totalDayChange ?? 0) >= 0}
+          />
           <StatCard
             label="NAV Return"
             value={`${comparison.portfolio.percentageReturn >= 0 ? '+' : ''}${formatPercent(comparison.portfolio.percentageReturn)}`}
@@ -377,9 +447,10 @@ export default function Performance() {
       {comparison && comparison.benchmarks.length > 0 && (
         <Card>
           <h2 className="text-lg font-semibold text-surface-100 mb-6">
-            Benchmark Returns ({selectedInterval === 'CUSTOM' && appliedDateRange.start
-              ? `${appliedDateRange.start} to ${appliedDateRange.end || 'now'}`
-              : queryInterval})
+            Benchmark Returns
+            <span className="text-sm font-normal text-surface-400 ml-2">
+              {formatDate(comparison.portfolio.startDate)} – {formatDate(comparison.portfolio.endDate)}
+            </span>
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -445,25 +516,73 @@ export default function Performance() {
         </Card>
       )}
 
+      {/* 5-Day Index Comparison */}
+      {fiveDayReturns && (
+        <Card>
+          <h2 className="text-lg font-semibold text-surface-100 mb-6">
+            5-Day Index Comparison
+            <span className="text-sm font-normal text-surface-400 ml-2">daily returns</span>
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-surface-700">
+                  <th className="table-header">Date</th>
+                  <th className="table-header text-right">Portfolio</th>
+                  {fiveDayReturns.benchmarkDailyReturns.map((b) => (
+                    <th key={b.symbol} className="table-header text-right">{b.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800">
+                {fiveDayReturns.dates.map((date, i) => (
+                  <tr key={date} className="hover:bg-surface-800/30">
+                    <td className="table-cell text-surface-300 text-sm">{formatDate(date)}</td>
+                    <td className={clsx(
+                      'table-cell text-right tabular-nums font-medium',
+                      fiveDayReturns.portfolioReturns[i] >= 0 ? 'text-green-400' : 'text-red-400'
+                    )}>
+                      {fiveDayReturns.portfolioReturns[i] >= 0 ? '+' : ''}
+                      {fiveDayReturns.portfolioReturns[i].toFixed(2)}%
+                    </td>
+                    {fiveDayReturns.benchmarkDailyReturns.map((b) => (
+                      <td key={b.symbol} className={clsx(
+                        'table-cell text-right tabular-nums font-medium',
+                        b.returns[i] == null ? 'text-surface-500' :
+                        b.returns[i]! >= 0 ? 'text-green-400' : 'text-red-400'
+                      )}>
+                        {b.returns[i] != null
+                          ? `${b.returns[i]! >= 0 ? '+' : ''}${b.returns[i]!.toFixed(2)}%`
+                          : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {/* Performance by Asset Class */}
       <Card>
         <h2 className="text-lg font-semibold text-surface-100 mb-6">
           Performance by Asset Class
         </h2>
-        {assetClassPerf && assetClassPerf.length > 0 ? (
+        {sortedAssetClassPerf.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-surface-700">
                   <th className="table-header">Asset Class</th>
                   <th className="table-header text-right">Holdings</th>
-                  <th className="table-header text-right">Total Value</th>
-                  <th className="table-header text-right">P&L %</th>
-                  <th className="table-header text-right">Realized P&L</th>
+                  <SortableHeader label="Total Value" column="value" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="P&L %" column="pnl" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="Realized P&L" column="realized" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
-                {assetClassPerf.map((item) => (
+                {sortedAssetClassPerf.map((item) => (
                   <tr key={item.assetClass} className="hover:bg-surface-800/30">
                     <td className="table-cell">
                       <AssetClassBadge assetClass={item.assetClass} />
@@ -552,6 +671,31 @@ function PerfTooltip({ active, payload, label }: any) {
         })}
       </div>
     </div>
+  );
+}
+
+function SortableHeader({ label, column, current, dir, onToggle }: {
+  label: string;
+  column: string;
+  current: string;
+  dir: 'asc' | 'desc';
+  onToggle: (col: any) => void;
+}) {
+  const isActive = current === column;
+  return (
+    <th
+      className="table-header text-right cursor-pointer select-none hover:text-surface-100 transition-colors"
+      onClick={() => onToggle(column)}
+    >
+      <span className="inline-flex items-center gap-1 justify-end">
+        {label}
+        {isActive ? (
+          dir === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 opacity-30" />
+        )}
+      </span>
+    </th>
   );
 }
 

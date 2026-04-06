@@ -6,11 +6,27 @@ import { benchmarkService } from './benchmark.service.js';
 import { db, schema, sqlite } from '../db/index.js';
 
 let snapshotTask: cron.ScheduledTask | null = null;
+let indianMarketTask: cron.ScheduledTask | null = null;
 
 export function startPriceUpdateScheduler() {
-  // Daily refresh + snapshot after US market close (9:30 PM UTC = 3 AM IST / 5:30 PM EDT)
+  // Indian market + MF NAV refresh: 7:30 PM IST = 14:00 UTC (weekdays)
+  // Captures Indian close prices and MF NAVs (published ~10-11 PM IST)
+  indianMarketTask = cron.schedule('0 14 * * 1-5', async () => {
+    console.log('Running Indian market price refresh...');
+    try {
+      const priceResult = await marketDataService.updateAllPrices();
+      console.log(`Indian refresh: ${priceResult.updated} updated, ${priceResult.failed} failed`);
+
+      const bmResult = await benchmarkService.updateAllBenchmarkPrices();
+      console.log(`Indian benchmark update: ${bmResult.updated} updated, ${bmResult.failed} failed`);
+    } catch (error) {
+      console.error('Indian market refresh error:', error);
+    }
+  });
+
+  // US market close + full snapshot (9:30 PM UTC = 3 AM IST / 5:30 PM EDT, weekdays)
   snapshotTask = cron.schedule('30 21 * * 1-5', async () => {
-    console.log('Running daily price refresh...');
+    console.log('Running daily price refresh + snapshot...');
     try {
       const priceResult = await marketDataService.updateAllPrices();
       console.log(`Daily price update: ${priceResult.updated} updated, ${priceResult.failed} failed`);
@@ -86,6 +102,10 @@ export function startPriceUpdateScheduler() {
 }
 
 export function stopPriceUpdateScheduler() {
+  if (indianMarketTask) {
+    indianMarketTask.stop();
+    indianMarketTask = null;
+  }
   if (snapshotTask) {
     snapshotTask.stop();
     snapshotTask = null;

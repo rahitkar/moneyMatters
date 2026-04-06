@@ -151,6 +151,7 @@ function generateSampleDates(startStr: string, endStr: string, interval: TimeInt
   const end = new Date(endStr);
 
   let stepDays: number;
+  const skipWeekends = interval === '1D' || interval === '5D' || interval === '1W';
   switch (interval) {
     case '1D': case '5D': case '1W': case '1M': stepDays = 1; break;
     case '3M': stepDays = 3; break;
@@ -161,12 +162,17 @@ function generateSampleDates(startStr: string, endStr: string, interval: TimeInt
 
   const current = new Date(start);
   while (current <= end) {
-    dates.push(dateToLocal(current));
+    const day = current.getUTCDay();
+    if (!skipWeekends || (day !== 0 && day !== 6)) {
+      dates.push(dateToLocal(current));
+    }
     current.setDate(current.getDate() + stepDays);
   }
 
   const endDateStr = dateToLocal(end);
-  if (dates.length === 0 || dates[dates.length - 1] !== endDateStr) {
+  const endDay = end.getUTCDay();
+  const endIsWeekend = skipWeekends && (endDay === 0 || endDay === 6);
+  if (!endIsWeekend && (dates.length === 0 || dates[dates.length - 1] !== endDateStr)) {
     dates.push(endDateStr);
   }
 
@@ -923,7 +929,20 @@ export const performanceService = {
       .limit(1)
       .then((r) => r[0]);
 
-    return quantity * (priceRecord?.price || 0);
+    if (priceRecord) {
+      return quantity * priceRecord.price;
+    }
+
+    // No price history before this date — fall back to average cost from transactions
+    let totalCost = 0;
+    let totalQty = 0;
+    for (const tx of transactions) {
+      if (tx.type === 'buy') {
+        totalCost += tx.quantity * tx.price;
+        totalQty += tx.quantity;
+      }
+    }
+    return totalQty > 0 ? quantity * (totalCost / totalQty) : 0;
   },
 
   // Get performance by tag
