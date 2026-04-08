@@ -15,7 +15,7 @@ import {
   useDeleteAsset,
   useExchangeRate,
 } from '../api/hooks';
-import { formatNumber, formatPercent, formatCurrency, todayLocal } from '../lib/format';
+import { formatNumber, formatPercent, formatCurrency, todayLocal, formatRelativeTime } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { HoldingWithValue, Asset, AssetClass } from '../api/types';
 
@@ -102,6 +102,9 @@ export default function Holdings() {
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {usdInrRate?.fetchedAt && (
+            <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+          )}
         </p>
       )}
 

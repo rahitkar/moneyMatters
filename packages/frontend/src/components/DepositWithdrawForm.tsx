@@ -11,8 +11,11 @@ interface DepositWithdrawFormProps {
   position: Position;
 }
 
+const INTEREST_CLASSES = new Set(['ppf', 'epf', 'nps', 'fixed_deposit']);
+
 export default function DepositWithdrawForm({ isOpen, onClose, position }: DepositWithdrawFormProps) {
   const [type, setType] = useState<'buy' | 'sell'>('buy');
+  const [isInterest, setIsInterest] = useState(false);
   const [amount, setAmount] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
   const [date, setDate] = useState(todayLocal());
@@ -23,6 +26,7 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
   const { data: allAssets } = useAssets();
   const cashAssets = allAssets?.filter((a) => a.assetClass === 'cash' && a.id !== position.assetId) ?? [];
 
+  const showInterest = INTEREST_CLASSES.has(position.assetClass);
   const isForeignCurrency = position.currency !== 'INR';
   const currencySymbol = position.currency === 'USD' ? '$' : position.currency;
 
@@ -55,33 +59,35 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
     try {
       await createTransaction.mutateAsync({
         assetId: position.assetId,
-        type,
+        type: isInterest ? 'buy' : type,
         quantity,
         price,
-        fundSourceId: fundSourceId || undefined,
+        fundSourceId: isInterest ? undefined : (fundSourceId || undefined),
         transactionDate: date,
-        notes: notes.trim() || undefined,
+        notes: (isInterest ? (notes.trim() || 'Interest credit') : notes.trim()) || undefined,
       });
       setAmount('');
       setExchangeRate('');
       setNotes('');
       setFundSourceId('');
       setType('buy');
+      setIsInterest(false);
       onClose();
     } catch {
       // Error handled by mutation
     }
   };
 
-  const isDeposit = type === 'buy';
+  const isDeposit = type === 'buy' && !isInterest;
+  const modeLabel = isInterest ? 'Interest' : isDeposit ? 'Deposit' : 'Withdraw';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`${isDeposit ? 'Deposit' : 'Withdraw'} — ${position.name}`} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={`${modeLabel} — ${position.name}`} size="sm">
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setType('buy')}
+            onClick={() => { setType('buy'); setIsInterest(false); }}
             className={clsx(
               'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
               isDeposit
@@ -93,16 +99,30 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
           </button>
           <button
             type="button"
-            onClick={() => setType('sell')}
+            onClick={() => { setType('sell'); setIsInterest(false); }}
             className={clsx(
               'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
-              !isDeposit
+              type === 'sell'
                 ? 'border-red-500/50 bg-red-500/20 text-red-400'
                 : 'border-surface-700 text-surface-400 hover:text-surface-200'
             )}
           >
             Withdraw
           </button>
+          {showInterest && (
+            <button
+              type="button"
+              onClick={() => { setType('buy'); setIsInterest(true); setFundSourceId(''); }}
+              className={clsx(
+                'flex-1 py-2 rounded-lg text-sm font-medium transition-colors border',
+                isInterest
+                  ? 'border-amber-500/50 bg-amber-500/20 text-amber-400'
+                  : 'border-surface-700 text-surface-400 hover:text-surface-200'
+              )}
+            >
+              Interest
+            </button>
+          )}
         </div>
 
         <div>
@@ -151,7 +171,7 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
           </>
         )}
 
-        {cashAssets.length > 0 && (
+        {cashAssets.length > 0 && !isInterest && (
           <div>
             <label className="label">{isDeposit ? 'From Account' : 'To Account'}</label>
             <select
@@ -184,7 +204,7 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
             type="text"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder={isDeposit ? 'e.g. Monthly contribution' : 'e.g. Partial withdrawal'}
+            placeholder={isInterest ? 'e.g. FY 2025-26 interest' : isDeposit ? 'e.g. Monthly contribution' : 'e.g. Partial withdrawal'}
             className="input"
           />
         </div>
@@ -194,7 +214,7 @@ export default function DepositWithdrawForm({ isOpen, onClose, position }: Depos
             Cancel
           </button>
           <button type="submit" disabled={createTransaction.isPending} className="btn btn-primary">
-            {createTransaction.isPending ? 'Saving...' : isDeposit ? 'Add Deposit' : 'Record Withdrawal'}
+            {createTransaction.isPending ? 'Saving...' : isInterest ? 'Add Interest' : isDeposit ? 'Add Deposit' : 'Record Withdrawal'}
           </button>
         </div>
       </form>

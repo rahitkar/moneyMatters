@@ -393,6 +393,8 @@ export interface CashFlowMonthSummary {
     cashUpiExpenses: number;
     ccBillTotal: number;
     totalInvested: number;
+    bankInvestments: number;
+    walletTransfers: number;
     closingBalance: number | null;
     savings: number;
   };
@@ -404,6 +406,8 @@ export interface CashFlowMonthSummary {
     totalNeed: number;
     totalLuxury: number;
     totalInvested: number;
+    bankInvestments: number;
+    walletTransfers: number;
     netSavings: number;
     remainingForInvestment: number;
     closingBalance: number | null;

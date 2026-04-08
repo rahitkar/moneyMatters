@@ -480,7 +480,7 @@ export default function FireSimulator() {
 
 function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdToInr: number | null }) {
   const currentMonthKey = todayLocal().slice(0, 7);
-  const [view, setView] = useState<'corpus' | 'cashflow'>('cashflow');
+  const [view, setView] = useState<'corpus' | 'cashflow'>('corpus');
 
   // Base scenario (first) for the investment target reference
   const baseScenario = data.scenarios[0];

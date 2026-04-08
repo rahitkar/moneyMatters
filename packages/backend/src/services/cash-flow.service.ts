@@ -444,7 +444,11 @@ export const cashFlowService = {
 
   // ── Investment derivation from existing transactions ──────────
 
-  async getInvestmentBreakdown(month: string): Promise<{ assetId: string; name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }[]> {
+  async getInvestmentBreakdown(month: string): Promise<{
+    investments: { assetId: string; name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }[];
+    walletTransfers: number;
+    bankInvestments: number;
+  }> {
     const cycleDay = await getCycleStartDay();
     const { start, end } = getCycleDateRange(month, cycleDay);
 
@@ -470,22 +474,34 @@ export const cashFlowService = {
       ))
       .all();
 
-    const bankAssets = await db
-      .select({ id: schema.assets.id })
+    const cashAssets = await db
+      .select({ id: schema.assets.id, symbol: schema.assets.symbol })
       .from(schema.assets)
       .where(eq(schema.assets.assetClass, 'cash'))
       .all();
-    const bankAssetIds = new Set(bankAssets.map((a) => a.id));
+    const cashAssetIds = new Set(cashAssets.map((a) => a.id));
+    const primaryBankId = cashAssets.find((a) => a.symbol.includes('SAVINGS-ACCOUNT'))?.id ?? null;
 
-    const investmentTx = allTx.filter((tx) => {
-      if (tx.type !== 'buy') return false;
+    const investmentTx: typeof allTx = [];
+    let walletTransfers = 0;
+    let bankInvestments = 0;
+
+    for (const tx of allTx) {
+      if (tx.type !== 'buy') continue;
+      // Cash-to-cash transfers (e.g. bank → broker wallet) are money movements, not investments
+      if (tx.fundSourceId && cashAssetIds.has(tx.assetId) && cashAssetIds.has(tx.fundSourceId)) {
+        if (tx.fundSourceId === primaryBankId) walletTransfers += tx.quantity * tx.price;
+        continue;
+      }
       // Connected ledger: funded by a cash/bank asset
-      if (tx.fundSourceId && bankAssetIds.has(tx.fundSourceId)) return true;
+      if (tx.fundSourceId && cashAssetIds.has(tx.fundSourceId)) {
+        investmentTx.push(tx);
+        if (tx.fundSourceId === primaryBankId) bankInvestments += tx.quantity * tx.price;
+        continue;
+      }
       // Legacy fallback: only non-INR cash deposits (e.g. USD wallets) without explicit fund source.
-      // INR cash deposits without fund source are likely opening balances, not investments.
-      if (!tx.fundSourceId && tx.assetClass === 'cash' && tx.assetCurrency !== 'INR') return true;
-      return false;
-    });
+      if (!tx.fundSourceId && tx.assetClass === 'cash' && tx.assetCurrency !== 'INR') { investmentTx.push(tx); continue; }
+    }
 
     const grouped = new Map<string, { name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }>();
     for (const tx of investmentTx) {
@@ -498,7 +514,11 @@ export const cashFlowService = {
       grouped.set(tx.assetId, existing);
     }
 
-    return Array.from(grouped, ([assetId, data]) => ({ assetId, ...data }));
+    return {
+      investments: Array.from(grouped, ([assetId, data]) => ({ assetId, ...data })),
+      walletTransfers,
+      bankInvestments,
+    };
   },
 
   // Compute the previous month's closing balance for auto-carry
@@ -538,16 +558,15 @@ export const cashFlowService = {
       return sum + (e.actual ?? 0);
     }, 0);
 
-    const investments = await this.getInvestmentBreakdown(month);
-    const totalInvested = investments.reduce((s, i) => s + i.amount, 0);
+    const breakdown = await this.getInvestmentBreakdown(month);
 
-    return openingBalance + totalIncome - totalExpenses - totalInvested;
+    return openingBalance + totalIncome - totalExpenses - breakdown.bankInvestments - breakdown.walletTransfers;
   },
 
   // ── Month summary ─────────────────────────────────────────────
 
   async getMonthSummary(month: string) {
-    const [income, entries, categories, investments, spends, paymentMethods] = await Promise.all([
+    const [income, entries, categories, investmentBreakdown, spends, paymentMethods] = await Promise.all([
       this.getIncome(month),
       this.getEntriesForMonth(month),
       this.getCategories(),
@@ -555,6 +574,9 @@ export const cashFlowService = {
       this.getSpendsForMonth(month),
       this.getPaymentMethods(),
     ]);
+    const investments = investmentBreakdown.investments;
+    const walletTransfers = investmentBreakdown.walletTransfers;
+    const bankInvestments = investmentBreakdown.bankInvestments;
 
     const categoryMap = new Map(categories.map((c) => [c.id, c]));
     const expenseRows = entries
@@ -629,9 +651,10 @@ export const cashFlowService = {
       const prevClosing = await this._getPreviousClosingBalance(month);
       if (prevClosing !== null) openingBalance = prevClosing;
     }
+    const bankOutflow = bankInvestments + walletTransfers;
     const savings = openingBalance !== null
-      ? openingBalance + totalIncome - totalExpenses - totalInvested
-      : totalIncome - totalExpenses - totalInvested;
+      ? openingBalance + totalIncome - totalExpenses - bankOutflow
+      : totalIncome - totalExpenses - bankOutflow;
     const closingBalance = openingBalance !== null ? savings : null;
 
     // CC bill: sum of credit_card payment method expenses
@@ -665,6 +688,8 @@ export const cashFlowService = {
         cashUpiExpenses,
         ccBillTotal,
         totalInvested,
+        bankInvestments,
+        walletTransfers,
         closingBalance,
         savings,
       },
@@ -676,6 +701,8 @@ export const cashFlowService = {
         totalNeed,
         totalLuxury,
         totalInvested,
+        bankInvestments,
+        walletTransfers,
         netSavings,
         remainingForInvestment,
         closingBalance,

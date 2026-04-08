@@ -14,7 +14,7 @@ import {
   useDeleteTag,
   useExchangeRate,
 } from '../api/hooks';
-import { formatCurrency } from '../lib/format';
+import { formatCurrency, formatRelativeTime } from '../lib/format';
 import CurrencyValue, { toInr } from '../components/CurrencyValue';
 import type { Tag, TagWithCount, HoldingWithValue } from '../api/types';
 import { api } from '../api/client';
@@ -62,6 +62,9 @@ export default function Tags() {
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {usdInrRate?.fetchedAt && (
+            <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+          )}
         </p>
       )}
 

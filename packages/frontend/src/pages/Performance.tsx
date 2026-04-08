@@ -25,7 +25,7 @@ import {
   useBackfillPrices,
   useDayChanges,
 } from '../api/hooks';
-import { formatCurrency, formatNumber, formatPercent, formatDate } from '../lib/format';
+import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime } from '../lib/format';
 import type { TimeInterval } from '../api/types';
 
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
@@ -104,7 +104,7 @@ export default function Performance() {
   const usdToInr = usdInrRate?.rate ?? null;
   const backfillPrices = useBackfillPrices();
 
-  type AcSortCol = 'value' | 'pnl' | 'realized';
+  type AcSortCol = 'value' | 'invested' | 'costPnl' | 'periodReturn' | 'unrealized' | 'realized';
   const [acSortCol, setAcSortCol] = useState<AcSortCol>('value');
   const [acSortDir, setAcSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -121,10 +121,17 @@ export default function Performance() {
     if (!assetClassPerf) return [];
     const copy = [...assetClassPerf];
     const dir = acSortDir === 'asc' ? 1 : -1;
+    const costPnlPct = (item: typeof copy[0]) => {
+      const cost = item.performance.totalCost;
+      return cost > 0 ? ((item.currentValue - cost) / cost) * 100 : 0;
+    };
     copy.sort((a, b) => {
       switch (acSortCol) {
         case 'value': return (a.currentValue - b.currentValue) * dir;
-        case 'pnl': return (a.performance.percentageReturn - b.performance.percentageReturn) * dir;
+        case 'invested': return (a.performance.totalCost - b.performance.totalCost) * dir;
+        case 'costPnl': return (costPnlPct(a) - costPnlPct(b)) * dir;
+        case 'periodReturn': return (a.performance.percentageReturn - b.performance.percentageReturn) * dir;
+        case 'unrealized': return (a.performance.unrealizedGains - b.performance.unrealizedGains) * dir;
         case 'realized': return (a.performance.realizedGains - b.performance.realizedGains) * dir;
       }
     });
@@ -320,6 +327,9 @@ export default function Performance() {
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {usdInrRate?.fetchedAt && (
+            <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+          )}
         </p>
       )}
       {comparison && (
@@ -577,45 +587,74 @@ export default function Performance() {
                   <th className="table-header">Asset Class</th>
                   <th className="table-header text-right">Holdings</th>
                   <SortableHeader label="Total Value" column="value" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
-                  <SortableHeader label="P&L %" column="pnl" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
-                  <SortableHeader label="Realized P&L" column="realized" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="Invested" column="invested" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="P&L %" column="costPnl" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label={`${queryInterval === 'CUSTOM' ? 'ALL' : queryInterval} Return`} column="periodReturn" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="Unrealized" column="unrealized" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
+                  <SortableHeader label="Realized" column="realized" current={acSortCol} dir={acSortDir} onToggle={toggleAcSort} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800">
-                {sortedAssetClassPerf.map((item) => (
-                  <tr key={item.assetClass} className="hover:bg-surface-800/30">
-                    <td className="table-cell">
-                      <AssetClassBadge assetClass={item.assetClass} />
-                    </td>
-                    <td className="table-cell text-right tabular-nums">
-                      {item.holdings}
-                    </td>
-                    <td className="table-cell text-right tabular-nums">
-                      {formatCurrency(item.currentValue, 'INR')}
-                    </td>
-                    <td
-                      className={clsx(
-                        'table-cell text-right tabular-nums font-medium',
-                        item.performance.percentageReturn >= 0
-                          ? 'text-green-400'
-                          : 'text-red-400'
-                      )}
-                    >
-                      {item.performance.percentageReturn >= 0 ? '+' : ''}
-                      {formatPercent(item.performance.percentageReturn)}
-                    </td>
-                    <td
-                      className={clsx(
-                        'table-cell text-right tabular-nums',
-                        item.performance.realizedGains >= 0
-                          ? 'text-green-400'
-                          : 'text-red-400'
-                      )}
-                    >
-                      {formatCurrency(item.performance.realizedGains, 'INR')}
-                    </td>
-                  </tr>
-                ))}
+                {sortedAssetClassPerf.map((item) => {
+                  const cost = item.performance.totalCost;
+                  const costPnl = item.currentValue - cost;
+                  const costPnlPct = cost > 0 ? (costPnl / cost) * 100 : 0;
+                  return (
+                    <tr key={item.assetClass} className="hover:bg-surface-800/30">
+                      <td className="table-cell">
+                        <AssetClassBadge assetClass={item.assetClass} />
+                      </td>
+                      <td className="table-cell text-right tabular-nums">
+                        {item.holdings}
+                      </td>
+                      <td className="table-cell text-right tabular-nums">
+                        {formatCurrency(item.currentValue, 'INR')}
+                      </td>
+                      <td className="table-cell text-right tabular-nums text-surface-400">
+                        {formatCurrency(cost, 'INR')}
+                      </td>
+                      <td
+                        className={clsx(
+                          'table-cell text-right tabular-nums font-medium',
+                          costPnlPct >= 0 ? 'text-green-400' : 'text-red-400'
+                        )}
+                      >
+                        {costPnlPct >= 0 ? '+' : ''}{formatPercent(costPnlPct)}
+                      </td>
+                      <td
+                        className={clsx(
+                          'table-cell text-right tabular-nums',
+                          item.performance.percentageReturn >= 0
+                            ? 'text-green-400'
+                            : 'text-red-400'
+                        )}
+                      >
+                        {item.performance.percentageReturn >= 0 ? '+' : ''}
+                        {formatPercent(item.performance.percentageReturn)}
+                      </td>
+                      <td
+                        className={clsx(
+                          'table-cell text-right tabular-nums',
+                          item.performance.unrealizedGains >= 0
+                            ? 'text-green-400'
+                            : 'text-red-400'
+                        )}
+                      >
+                        {formatCurrency(item.performance.unrealizedGains, 'INR')}
+                      </td>
+                      <td
+                        className={clsx(
+                          'table-cell text-right tabular-nums',
+                          item.performance.realizedGains >= 0
+                            ? 'text-green-400'
+                            : 'text-red-400'
+                        )}
+                      >
+                        {formatCurrency(item.performance.realizedGains, 'INR')}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

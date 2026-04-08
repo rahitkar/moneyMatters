@@ -364,13 +364,16 @@ export default function CashFlow() {
             <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Bank Account Flow</h3>
             {(() => {
               const ob = summary.waterfall.openingBalance ?? 0;
-              const currentBankBalance = ob + summary.waterfall.totalIncome - summary.totals.totalInvested - summary.waterfall.cashUpiExpenses;
+              const bi = summary.waterfall.bankInvestments ?? 0;
+              const wt = summary.waterfall.walletTransfers ?? 0;
+              const currentBankBalance = ob + summary.waterfall.totalIncome - bi - wt - summary.waterfall.cashUpiExpenses;
               return (
                 <div className="space-y-1.5 text-sm">
                   {[
                     { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
                     { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
-                    { label: 'Investment Transfers', value: summary.totals.totalInvested, color: 'text-blue-400', sign: '−' },
+                    ...(bi > 0 ? [{ label: 'Investment Transfers', value: bi, color: 'text-blue-400', sign: '−' }] : []),
+                    ...(wt > 0 ? [{ label: 'Wallet / Broker Transfers', value: wt, color: 'text-purple-400', sign: '−' }] : []),
                     { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
                   ].map((row) => (
                     <div key={row.label} className="flex items-center justify-between py-1 border-b border-surface-800 last:border-b-0">
@@ -525,7 +528,12 @@ export default function CashFlow() {
                 <div className="space-y-2">
                   {cashPositions.map((pos) => {
                     const isForeign = pos.currency !== 'INR';
-                    const inrValue = isForeign && usdToInr ? pos.currentValue * usdToInr : pos.currentValue;
+                    const isSavingsAccount = pos.symbol.includes('SAVINGS-ACCOUNT');
+                    const bankBal = isSavingsAccount && summary?.waterfall.openingBalance != null
+                      ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
+                      : null;
+                    const displayValue = bankBal ?? pos.currentValue;
+                    const inrValue = isForeign && usdToInr ? displayValue * usdToInr : displayValue;
                     return (
                       <div key={pos.assetId} className="flex items-center justify-between py-2 border-b border-surface-800 last:border-0">
                         <span className="text-surface-300 text-sm">{pos.name}</span>
@@ -536,12 +544,12 @@ export default function CashFlow() {
                                 {formatCurrency(inrValue, 'INR')}
                               </span>
                               <span className="text-surface-500 text-xs ml-1.5 tabular-nums">
-                                ({formatCurrency(pos.currentValue, pos.currency)})
+                                ({formatCurrency(displayValue, pos.currency)})
                               </span>
                             </>
                           ) : (
                             <span className="text-surface-100 font-medium tabular-nums">
-                              {formatCurrency(pos.currentValue, 'INR')}
+                              {formatCurrency(displayValue, 'INR')}
                             </span>
                           )}
                         </div>
@@ -553,8 +561,13 @@ export default function CashFlow() {
                     <span className="text-brand-400 tabular-nums">
                       {formatCurrency(
                         cashPositions.reduce((sum, p) => {
-                          if (p.currency === 'INR') return sum + p.currentValue;
-                          return sum + (usdToInr ? p.currentValue * usdToInr : 0);
+                          const isSav = p.symbol.includes('SAVINGS-ACCOUNT');
+                          const bankVal = isSav && summary?.waterfall.openingBalance != null
+                            ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
+                            : null;
+                          const val = bankVal ?? p.currentValue;
+                          if (p.currency === 'INR') return sum + val;
+                          return sum + (usdToInr ? val * usdToInr : 0);
                         }, 0),
                         'INR',
                       )}

@@ -319,7 +319,7 @@ export const transactionService = {
     }
 
     // For cash/wallet assets, position cost = quantity (1:1 value)
-    const isCashLike = ['cash', 'lended', 'fixed_deposit'].includes(asset.assetClass);
+    const isCashLike = ['cash', 'lended', 'fixed_deposit', 'ppf', 'epf'].includes(asset.assetClass);
     const currentPrice = isCashLike ? 1 : (asset.currentPrice ?? 0);
     const effectiveQuantity = isCashLike ? totalQuantity : Math.max(0, totalQuantity);
     const currentValue = effectiveQuantity * currentPrice;

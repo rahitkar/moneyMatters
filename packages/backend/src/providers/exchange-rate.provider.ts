@@ -10,6 +10,7 @@ export interface ExchangeRate {
   to: string;
   rate: number;
   date: string;
+  fetchedAt: string;
 }
 
 const rateCache = new Map<string, { rate: ExchangeRate; ts: number }>();
@@ -59,6 +60,7 @@ export const exchangeRateProvider = {
       to: to.toUpperCase(),
       rate,
       date: today,
+      fetchedAt: new Date().toISOString(),
     };
     rateCache.set(key, { rate: result, ts: Date.now() });
     return result;
@@ -102,6 +104,7 @@ export const exchangeRateProvider = {
         to: to.toUpperCase(),
         rate: data.rates[to.toUpperCase()] || 0,
         date: data.date,
+        fetchedAt: new Date().toISOString(),
       };
     } catch (error) {
       console.error(`Historical exchange rate error:`, error);

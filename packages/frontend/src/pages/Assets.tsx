@@ -691,6 +691,9 @@ export default function Assets() {
           {usdToInr && (
             <p className="text-xs text-surface-500 tabular-nums">
               1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {usdInrRate?.fetchedAt && (
+                <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+              )}
             </p>
           )}
         </div>

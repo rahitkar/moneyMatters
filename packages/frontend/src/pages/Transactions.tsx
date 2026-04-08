@@ -26,7 +26,7 @@ import {
   useRealizedGainsTotal,
   useExchangeRate,
 } from '../api/hooks';
-import { formatCurrency, formatNumber, formatDate, todayLocal } from '../lib/format';
+import { formatCurrency, formatNumber, formatDate, todayLocal, formatRelativeTime } from '../lib/format';
 import CurrencyValue, { toInr } from '../components/CurrencyValue';
 import type { TransactionWithAsset, TransactionType, Asset, Position } from '../api/types';
 
@@ -112,6 +112,9 @@ export default function Transactions() {
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-4">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {usdInrRate?.fetchedAt && (
+            <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+          )}
         </p>
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -289,10 +292,15 @@ function TransactionModal({
     quantity: '',
     price: '',
     fees: '',
+    fundSourceId: '',
     transactionDate: todayLocal(),
     notes: '',
   });
 
+  const cashAssets = useMemo(
+    () => assets.filter((a) => a.assetClass === 'cash'),
+    [assets],
+  );
   const selectedAsset = assets.find((a) => a.id === formData.assetId);
   const selectedCurrency = selectedAsset?.currency ?? 'INR';
   const selectedPosition = positions.find((p) => p.assetId === formData.assetId);
@@ -308,6 +316,7 @@ function TransactionModal({
         quantity: parseFloat(formData.quantity),
         price: parseFloat(formData.price),
         fees: formData.fees ? parseFloat(formData.fees) : undefined,
+        fundSourceId: formData.fundSourceId || undefined,
         transactionDate: formData.transactionDate,
         notes: formData.notes || undefined,
       });
@@ -318,6 +327,7 @@ function TransactionModal({
         quantity: '',
         price: '',
         fees: '',
+        fundSourceId: '',
         transactionDate: todayLocal(),
         notes: '',
       });
@@ -445,6 +455,23 @@ function TransactionModal({
             />
           </div>
         </div>
+
+        {/* Fund Source */}
+        {cashAssets.length > 0 && (
+          <div>
+            <label className="label">{formData.type === 'buy' ? 'Paid From' : 'Proceeds To'}</label>
+            <select
+              value={formData.fundSourceId}
+              onChange={(e) => setFormData((f) => ({ ...f, fundSourceId: e.target.value }))}
+              className="input"
+            >
+              <option value="">— None —</option>
+              {cashAssets.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Notes */}
         <div>

@@ -41,7 +41,7 @@ import {
   useExchangeRate,
 } from '../api/hooks';
 import type { AllocDimension } from '../api/hooks';
-import { formatCurrency, formatPercent, formatNumber, formatDate } from '../lib/format';
+import { formatCurrency, formatPercent, formatNumber, formatDate, formatRelativeTime } from '../lib/format';
 import CurrencyValue from '../components/CurrencyValue';
 import type { TimeInterval, DimensionSlice } from '../api/types';
 
@@ -312,6 +312,9 @@ export default function Dashboard() {
       {usdToInr && (
         <p className="text-xs text-surface-500 text-right tabular-nums -mb-6">
           1 USD = {formatCurrency(usdToInr, 'INR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {usdInrRate?.fetchedAt && (
+            <span className="ml-1.5 text-surface-600">· {formatRelativeTime(usdInrRate.fetchedAt)}</span>
+          )}
         </p>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

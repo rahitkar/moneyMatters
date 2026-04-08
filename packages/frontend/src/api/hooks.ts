@@ -345,7 +345,7 @@ export function useExchangeRate(from: string, to: string) {
   return useQuery({
     queryKey: queryKeys.exchangeRate(from, to),
     queryFn: () =>
-      api.get<{ rate: { from: string; to: string; rate: number; date: string } }>(
+      api.get<{ rate: { from: string; to: string; rate: number; date: string; fetchedAt: string } }>(
         `/market-data/rate/${from}/${to}`
       ).then((r) => r.rate),
     enabled: from !== to,
