@@ -352,7 +352,7 @@ export default function FireSimulator() {
                     label={{ value: 'Age', position: 'insideBottomRight', offset: -5, fill: '#52525b', fontSize: 10 }} />
                   <YAxis stroke="#52525b" fontSize={11} tickFormatter={yFmt} />
                   <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#a1a1aa' }}
-                    formatter={(v: number | null, name: string) => {
+                    formatter={(v: any, name: string) => {
                       if (v == null) return ['—', name];
                       const label = name === 'actual' ? 'Portfolio' : comparison.simulations[parseInt(name.split('_')[1])]?.name ?? name;
                       const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
@@ -440,7 +440,7 @@ export default function FireSimulator() {
                       contentStyle={tooltipStyle}
                       labelStyle={{ color: '#a1a1aa' }}
                       labelFormatter={(age) => `Age ${age}${Number(age) === retireAge ? ' (Retire)' : ''}`}
-                      formatter={(v: number | null, name: string) => {
+                      formatter={(v: any, name: string) => {
                         if (v == null) return ['—', labels[name] ?? name];
                         const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
                         return [`${formatCurrency(v, 'INR')}${usd}`, labels[name] ?? name];
@@ -584,7 +584,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                 <Tooltip
                   contentStyle={tooltipStyle}
                   labelStyle={{ color: '#a1a1aa' }}
-                  formatter={(v: number | null, name: string) => {
+                  formatter={(v: any, name: string) => {
                     if (v == null) return ['—', name];
                     const labels: Record<string, string> = {
                       income: 'Income',
@@ -598,7 +598,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                   }}
                 />
                 <Legend
-                  formatter={(v) => ({
+                  formatter={(v: string) => ({
                     income: 'Income',
                     investmentTarget: 'Inv. Target',
                     expenditureTarget: 'Exp. Budget',
@@ -753,7 +753,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                 <Tooltip
                   contentStyle={tooltipStyle}
                   labelStyle={{ color: '#a1a1aa' }}
-                  formatter={(v: number | null, name: string) => {
+                  formatter={(v: any, name: string) => {
                     if (v == null) return ['—', name];
                     const usd = usdToInr ? ` (${fmtUsd(v, usdToInr)})` : '';
                     if (name === 'actual') return [`${formatCurrency(v, 'INR')}${usd}`, 'Actual Portfolio'];

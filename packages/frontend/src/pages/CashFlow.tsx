@@ -339,9 +339,9 @@ export default function CashFlow() {
                   <span className="text-surface-500 text-[10px] font-normal">(auto)</span>
                 )}
               </button>
-              {summary?.income.totalIncome > 0 && (
+              {(summary?.income?.totalIncome ?? 0) > 0 && (
                 <span className="text-surface-500 text-xs flex items-center gap-1">
-                  <DollarSign className="w-3 h-3" /> Income: {formatCurrency(summary.income.totalIncome, 'INR')}
+                  <DollarSign className="w-3 h-3" /> Income: {formatCurrency(summary!.income.totalIncome, 'INR')}
                 </span>
               )}
               {cycleStartDay > 1 && summary?.cycleStart && (
@@ -726,7 +726,7 @@ export default function CashFlow() {
                     <Tooltip
                       contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
                       labelStyle={{ color: '#a1a1aa' }}
-                      formatter={(value: number | null, name: string) => {
+                      formatter={(value: any, name: string) => {
                         if (value == null) return ['—', name];
                         if (name === 'actual') return [formatCurrency(value, 'INR'), 'Net Worth'];
                         if (name === 'stretch') return [formatCurrency(value, 'INR'), 'Stretch Target'];
