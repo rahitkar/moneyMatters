@@ -22,12 +22,26 @@ const CORS_ORIGINS = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5
 
 const fastify = Fastify({
   logger: true,
+  requestTimeout: 25000,
 });
 
-// Register CORS
 await fastify.register(cors, {
   origin: CORS_ORIGINS,
   credentials: true,
+});
+
+fastify.setErrorHandler((error, request, reply) => {
+  const origin = request.headers.origin;
+  if (origin && CORS_ORIGINS.includes(origin)) {
+    reply.header('access-control-allow-origin', origin);
+    reply.header('access-control-allow-credentials', 'true');
+  }
+  const statusCode = error.statusCode ?? 500;
+  request.log.error(error);
+  reply.status(statusCode).send({
+    error: error.name || 'InternalServerError',
+    message: statusCode === 500 ? 'Internal Server Error' : error.message,
+  });
 });
 
 // Initialize database (async for Postgres)
