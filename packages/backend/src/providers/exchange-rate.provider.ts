@@ -14,7 +14,8 @@ export interface ExchangeRate {
 }
 
 const rateCache = new Map<string, { rate: ExchangeRate; ts: number }>();
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours — only refreshed explicitly via Refresh Prices
+const CACHE_TTL = 24 * 60 * 60 * 1000;
+const inflight = new Map<string, Promise<ExchangeRate | null>>();
 
 async function yahooFxRate(from: string, to: string): Promise<number | null> {
   const symbol = `${from.toUpperCase()}${to.toUpperCase()}=X`;
@@ -45,9 +46,20 @@ export const exchangeRateProvider = {
     const cached = rateCache.get(key);
     if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.rate;
 
+    if (inflight.has(key)) return inflight.get(key)!;
+
+    const promise = this._fetchRate(from, to, key);
+    inflight.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      inflight.delete(key);
+    }
+  },
+
+  async _fetchRate(from: string, to: string, key: string): Promise<ExchangeRate | null> {
     const today = todayLocal();
 
-    // Yahoo Finance (live market rate) → fallback to frankfurter (ECB reference rate)
     let rate = await yahooFxRate(from, to);
     if (rate == null) {
       console.warn(`Yahoo FX unavailable for ${key}, falling back to frankfurter`);
