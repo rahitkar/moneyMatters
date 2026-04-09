@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: packages/backend
-    buildCommand: npm install && npm run build
+    buildCommand: rm -rf node_modules && npm install && npm run build
     startCommand: npm run start
     envVars:
       - key: DATABASE_URL
