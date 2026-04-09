@@ -78,9 +78,9 @@ export const yahooFinanceProvider = {
         .filter((q): q is typeof q & { symbol: string } => !!q.symbol)
         .map((q) => ({
           symbol: q.symbol,
-          name: ('shortname' in q ? q.shortname : q.symbol) || q.symbol,
-          type: ('quoteType' in q ? q.quoteType : 'EQUITY') || 'EQUITY',
-          exchange: ('exchange' in q ? q.exchange : '') || '',
+          name: String(('shortname' in q ? q.shortname : q.symbol) || q.symbol),
+          type: String(('quoteType' in q ? q.quoteType : 'EQUITY') || 'EQUITY'),
+          exchange: String(('exchange' in q ? q.exchange : '') || ''),
         }));
     } catch (error) {
       console.error('Yahoo Finance search error:', error);

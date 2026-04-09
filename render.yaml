@@ -3,7 +3,7 @@ services:
     name: money-matters-api
     runtime: node
     plan: free
-    buildCommand: cd packages/backend && npm install --include=dev && npm run build
+    buildCommand: cd packages/backend && npm install --production=false && npm run build
     startCommand: cd packages/backend && node dist/index.js
     envVars:
       - key: DATABASE_URL
