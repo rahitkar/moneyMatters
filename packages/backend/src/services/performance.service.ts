@@ -1,6 +1,6 @@
 import { eq, and, gte, lte, desc, asc, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
-import { db, schema } from '../db/index.js';
+import { db, client, schema } from '../db/index.js';
 import { transactionService } from './transaction.service.js';
 import { benchmarkService, type BenchmarkPerformance } from './benchmark.service.js';
 import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
@@ -324,8 +324,7 @@ export function getDimensionLabel(dim: AllocDimension, assetClass: string, symbo
 }
 
 export const performanceService = {
-  // Load all transaction and price data needed for history calculations
-  async _loadPriceTimelines(userId: string, endDateStr: string, allowedAssetIds?: Set<string>) {
+  async _loadPriceTimelines(userId: string, endDateStr: string, allowedAssetIds?: Set<string>, startDateStr?: string) {
     const txRows = await db
       .select({ tx: schema.transactions })
       .from(schema.transactions)
@@ -348,9 +347,20 @@ export const performanceService = {
     const priceHistoryRecords =
       assetIdList.length > 0
         ? await db
-            .select()
+            .select({
+              assetId: schema.priceHistory.assetId,
+              recordedAt: schema.priceHistory.recordedAt,
+              price: schema.priceHistory.price,
+            })
             .from(schema.priceHistory)
-            .where(inArray(schema.priceHistory.assetId, assetIdList))
+            .where(
+              startDateStr
+                ? and(
+                    inArray(schema.priceHistory.assetId, assetIdList),
+                    gte(schema.priceHistory.recordedAt, new Date(startDateStr))
+                  )
+                : inArray(schema.priceHistory.assetId, assetIdList)
+            )
             .orderBy(asc(schema.priceHistory.recordedAt))
         : [];
 
@@ -456,7 +466,7 @@ export const performanceService = {
     const startDateStr = dateToLocal(startDate);
 
     const { transactions, priceTimeline, currencyMap, assetClassMap, symbolMap } =
-      await this._loadPriceTimelines(userId, endDateStr);
+      await this._loadPriceTimelines(userId, endDateStr, undefined, startDateStr);
 
     if (transactions.length === 0) return { series: [] };
 
@@ -530,7 +540,7 @@ export const performanceService = {
     currentNAV: number;
   }> {
     const { transactions, priceTimeline, currencyMap, assetClassMap } =
-      await this._loadPriceTimelines(userId, endDateStr, allowedAssetIds);
+      await this._loadPriceTimelines(userId, endDateStr, allowedAssetIds, startDateStr);
 
     if (transactions.length === 0) {
       return { navHistory: [], valueHistory: [], units: 0, currentNAV: BASE_NAV };
@@ -746,7 +756,85 @@ export const performanceService = {
     };
   },
 
-  // Estimate portfolio value at a specific date
+  /**
+   * Batch-fetch the latest price at or before `dateStr` for each assetId.
+   * Returns Map<assetId, price>. One query instead of N.
+   */
+  async _batchPricesAtDate(assetIds: string[], dateStr: string): Promise<Map<string, number>> {
+    if (assetIds.length === 0) return new Map();
+    const cutoff = dateStr + 'T23:59:59Z';
+    const rows = await client`
+      SELECT DISTINCT ON (asset_id)
+        asset_id, price
+      FROM price_history
+      WHERE asset_id IN ${client(assetIds)}
+        AND recorded_at <= ${cutoff}::timestamptz
+      ORDER BY asset_id, recorded_at DESC
+    `;
+    const result = new Map<string, number>();
+    for (const row of rows) {
+      result.set(row.asset_id, row.price);
+    }
+    return result;
+  },
+
+  /**
+   * Batch-estimate values for multiple assets at a date.
+   * Replaces per-asset estimateAssetValueAtDate calls.
+   */
+  async _batchEstimateAssetValues(
+    assetIds: string[],
+    dateStr: string
+  ): Promise<Map<string, number>> {
+    if (assetIds.length === 0) return new Map();
+
+    const txs = await db
+      .select()
+      .from(schema.transactions)
+      .where(
+        and(
+          inArray(schema.transactions.assetId, assetIds),
+          lte(schema.transactions.transactionDate, dateStr)
+        )
+      );
+
+    const positionsByAsset = new Map<string, { quantity: number; cost: number }>();
+    for (const tx of txs) {
+      const cur = positionsByAsset.get(tx.assetId) || { quantity: 0, cost: 0 };
+      if (tx.type === 'buy') {
+        cur.quantity += tx.quantity;
+        cur.cost += tx.quantity * tx.price;
+      } else {
+        cur.quantity -= tx.quantity;
+        const avgCost = cur.quantity > 0 ? cur.cost / (cur.quantity + tx.quantity) : 0;
+        cur.cost -= tx.quantity * avgCost;
+      }
+      positionsByAsset.set(tx.assetId, cur);
+    }
+
+    const heldAssetIds = [...positionsByAsset.entries()]
+      .filter(([, p]) => p.quantity > 0)
+      .map(([id]) => id);
+
+    const priceMap = await this._batchPricesAtDate(heldAssetIds, dateStr);
+
+    const result = new Map<string, number>();
+    for (const [assetId, position] of positionsByAsset) {
+      if (position.quantity <= 0) {
+        result.set(assetId, 0);
+        continue;
+      }
+      const price = priceMap.get(assetId);
+      if (price != null) {
+        result.set(assetId, position.quantity * price);
+      } else {
+        const avgCost = position.quantity > 0 ? position.cost / position.quantity : 0;
+        result.set(assetId, position.quantity * avgCost);
+      }
+    }
+    return result;
+  },
+
   async estimatePortfolioValueAtDate(userId: string, dateStr: string): Promise<number> {
     const txRows = await db
       .select({ tx: schema.transactions })
@@ -758,9 +846,7 @@ export const performanceService = {
       .orderBy(asc(schema.transactions.transactionDate));
     const transactions = txRows.map((r) => r.tx);
 
-    // Calculate positions at that date
     const positions = new Map<string, { quantity: number; cost: number }>();
-
     for (const tx of transactions) {
       const current = positions.get(tx.assetId) || { quantity: 0, cost: 0 };
       if (tx.type === 'buy') {
@@ -768,36 +854,25 @@ export const performanceService = {
         current.cost += tx.quantity * tx.price;
       } else {
         current.quantity -= tx.quantity;
-        // Approximate cost reduction
         const avgCost = current.quantity > 0 ? current.cost / (current.quantity + tx.quantity) : 0;
         current.cost -= tx.quantity * avgCost;
       }
       positions.set(tx.assetId, current);
     }
 
-    // Get prices at that date (or closest available)
+    const heldAssetIds = [...positions.entries()]
+      .filter(([, p]) => p.quantity > 0)
+      .map(([id]) => id);
+
+    const priceMap = await this._batchPricesAtDate(heldAssetIds, dateStr);
+
     let totalValue = 0;
     for (const [assetId, position] of positions) {
       if (position.quantity <= 0) continue;
-
-      const priceRecord = await db
-        .select()
-        .from(schema.priceHistory)
-        .where(
-          and(
-            eq(schema.priceHistory.assetId, assetId),
-            lte(sql`date(${schema.priceHistory.recordedAt}, 'unixepoch')`, dateStr)
-          )
-        )
-        .orderBy(desc(schema.priceHistory.recordedAt))
-        .limit(1)
-        .then((r) => r[0]);
-
-      const price = priceRecord?.price || 0;
+      const price = priceMap.get(assetId) || 0;
       totalValue += position.quantity * price;
     }
 
-    // If no price history, use cost as approximation
     if (totalValue === 0) {
       for (const [, position] of positions) {
         if (position.quantity > 0) {
@@ -872,6 +947,9 @@ export const performanceService = {
       byClass.set(assetClass, existing);
     }
 
+    const allAssetIds = positions.map((p) => p.assetId);
+    const historicalValues = await this._batchEstimateAssetValues(allAssetIds, startDateStr);
+
     const results: AssetClassPerformance[] = [];
 
     for (const [assetClass, data] of byClass) {
@@ -879,11 +957,7 @@ export const performanceService = {
       for (const position of data.positions) {
         const cur = position.currency || 'INR';
         const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
-        const historicalValue = await this.estimateAssetValueAtDate(
-          userId,
-          position.assetId,
-          startDateStr
-        );
+        const historicalValue = historicalValues.get(position.assetId) ?? 0;
         startValue += toInr(historicalValue, cur, usdToInr) * metalAdj;
       }
 
@@ -951,14 +1025,13 @@ export const performanceService = {
 
     if (quantity <= 0) return 0;
 
-    // Get price at that date
     const priceRecord = await db
       .select()
       .from(schema.priceHistory)
       .where(
         and(
           eq(schema.priceHistory.assetId, assetId),
-          lte(sql`date(${schema.priceHistory.recordedAt}, 'unixepoch')`, dateStr)
+          lte(schema.priceHistory.recordedAt, new Date(dateStr + 'T23:59:59Z'))
         )
       )
       .orderBy(desc(schema.priceHistory.recordedAt))
@@ -1035,6 +1108,9 @@ export const performanceService = {
     }
     const startDateStr = dateToLocal(startDate);
 
+    const tagAssetIds = positions.map((p) => p.assetId);
+    const historicalValues = await this._batchEstimateAssetValues(tagAssetIds, startDateStr);
+
     let startValue = 0;
     let endValue = 0;
     let totalCost = 0;
@@ -1044,7 +1120,7 @@ export const performanceService = {
     for (const position of positions) {
       const cur = position.currency || 'INR';
       const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
-      const histValue = await this.estimateAssetValueAtDate(userId, position.assetId, startDateStr);
+      const histValue = historicalValues.get(position.assetId) ?? 0;
       startValue += toInr(histValue, cur, usdToInr) * metalAdj;
       endValue += toInr(position.currentValue, cur, usdToInr) * metalAdj;
       totalCost += toInr(position.totalCost, cur, usdToInr);
