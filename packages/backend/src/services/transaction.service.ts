@@ -374,12 +374,149 @@ export const transactionService = {
       .select()
       .from(schema.assets)
       .where(eq(schema.assets.userId, userId));
+
+    if (assets.length === 0) return [];
+
+    const assetIds = assets.map((a) => a.id);
+    const assetMap = new Map(assets.map((a) => [a.id, a]));
+
+    const [allTransactions, allRealizedGains, allFundSourceTx, lastTxDates, lastPriceDates] = await Promise.all([
+      db.select()
+        .from(schema.transactions)
+        .where(sql`${schema.transactions.assetId} IN (${sql.join(assetIds.map((id) => sql`${id}`), sql`, `)})`)
+        .orderBy(asc(schema.transactions.transactionDate)),
+      db.select()
+        .from(schema.realizedGains)
+        .where(sql`${schema.realizedGains.assetId} IN (${sql.join(assetIds.map((id) => sql`${id}`), sql`, `)})`),
+      db.select()
+        .from(schema.transactions)
+        .where(sql`${schema.transactions.fundSourceId} IN (${sql.join(assetIds.map((id) => sql`${id}`), sql`, `)})`),
+      db.select({
+        assetId: schema.transactions.assetId,
+        maxDate: sql<string>`MAX(transaction_date)`,
+      })
+        .from(schema.transactions)
+        .where(sql`${schema.transactions.assetId} IN (${sql.join(assetIds.map((id) => sql`${id}`), sql`, `)})`)
+        .groupBy(schema.transactions.assetId),
+      db.select({
+        assetId: schema.priceHistory.assetId,
+        maxTs: sql<string>`MAX(recorded_at)`,
+      })
+        .from(schema.priceHistory)
+        .where(sql`${schema.priceHistory.assetId} IN (${sql.join(assetIds.map((id) => sql`${id}`), sql`, `)})`)
+        .groupBy(schema.priceHistory.assetId),
+    ]);
+
+    const txByAsset = new Map<string, typeof allTransactions>();
+    for (const tx of allTransactions) {
+      const list = txByAsset.get(tx.assetId) || [];
+      list.push(tx);
+      txByAsset.set(tx.assetId, list);
+    }
+
+    const rgByAsset = new Map<string, typeof allRealizedGains>();
+    for (const rg of allRealizedGains) {
+      const list = rgByAsset.get(rg.assetId) || [];
+      list.push(rg);
+      rgByAsset.set(rg.assetId, list);
+    }
+
+    const fsByAsset = new Map<string, typeof allFundSourceTx>();
+    for (const tx of allFundSourceTx) {
+      const list = fsByAsset.get(tx.fundSourceId!) || [];
+      list.push(tx);
+      fsByAsset.set(tx.fundSourceId!, list);
+    }
+
+    const lastTxMap = new Map(lastTxDates.map((r) => [r.assetId, r.maxDate]));
+    const lastPriceMap = new Map(lastPriceDates.map((r) => [r.assetId, r.maxTs]));
+
     const positions: Position[] = [];
 
     for (const asset of assets) {
-      const position = await this.getPositionForAsset(userId, asset.id);
-      if (position && position.quantity > 0) {
-        positions.push(position);
+      const transactions = txByAsset.get(asset.id) || [];
+      const realizedGainsData = rgByAsset.get(asset.id) || [];
+      const fundSourceTx = fsByAsset.get(asset.id) || [];
+
+      let totalQuantity = 0;
+      let totalCost = 0;
+      let totalRealizedGain = 0;
+      const lotRemaining = new Map<string, { quantity: number; price: number }>();
+
+      for (const tx of transactions) {
+        if (tx.type === 'buy') {
+          lotRemaining.set(tx.id, { quantity: tx.quantity, price: tx.price });
+          totalQuantity += tx.quantity;
+          totalCost += tx.quantity * tx.price + (tx.fees ?? 0);
+        } else {
+          totalQuantity -= tx.quantity;
+        }
+      }
+
+      for (const tx of fundSourceTx) {
+        const amount = tx.quantity * tx.price + (tx.fees ?? 0);
+        if (tx.type === 'buy') {
+          totalQuantity -= amount;
+          totalCost -= amount;
+        } else {
+          totalQuantity += (tx.quantity * tx.price - (tx.fees ?? 0));
+          totalCost += (tx.quantity * tx.price - (tx.fees ?? 0));
+        }
+      }
+
+      for (const gain of realizedGainsData) {
+        const lot = lotRemaining.get(gain.buyTransactionId);
+        if (lot) {
+          lot.quantity -= gain.quantity;
+          totalCost -= gain.costBasis;
+        }
+        totalRealizedGain += gain.gain;
+      }
+
+      let positionCost = 0;
+      for (const [, lot] of lotRemaining) {
+        if (lot.quantity > 0) {
+          positionCost += lot.quantity * lot.price;
+        }
+      }
+
+      const isCashLike = ['cash', 'lended', 'fixed_deposit', 'ppf', 'epf'].includes(asset.assetClass);
+      const currentPrice = isCashLike ? 1 : (asset.currentPrice ?? 0);
+      const effectiveQuantity = isCashLike ? totalQuantity : Math.max(0, totalQuantity);
+      const currentValue = effectiveQuantity * currentPrice;
+      const unrealizedGain = isCashLike ? 0 : (currentValue - positionCost);
+      const unrealizedGainPercent = positionCost > 0 && !isCashLike ? (unrealizedGain / positionCost) * 100 : 0;
+      const averageCost = effectiveQuantity > 0 ? positionCost / effectiveQuantity : 0;
+
+      let lastActivityDate: string | null = null;
+      if (asset.provider === 'manual') {
+        lastActivityDate = lastTxMap.get(asset.id) ?? null;
+      } else {
+        const lastPrice = lastPriceMap.get(asset.id) ?? null;
+        if (lastPrice) {
+          lastActivityDate = new Date(lastPrice).toISOString();
+        } else if (asset.lastUpdated) {
+          lastActivityDate = new Date(asset.lastUpdated.getTime()).toISOString();
+        }
+      }
+
+      if (effectiveQuantity > 0) {
+        positions.push({
+          assetId: asset.id,
+          symbol: asset.symbol,
+          name: asset.name,
+          assetClass: asset.assetClass,
+          currency: asset.currency || 'USD',
+          quantity: effectiveQuantity,
+          averageCost: isCashLike ? 1 : averageCost,
+          totalCost: isCashLike ? effectiveQuantity : positionCost,
+          currentPrice,
+          currentValue,
+          unrealizedGain,
+          unrealizedGainPercent,
+          realizedGain: totalRealizedGain,
+          lastActivityDate,
+        });
       }
     }
 
