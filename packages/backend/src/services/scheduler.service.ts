@@ -47,63 +47,67 @@ export function startPriceUpdateScheduler() {
     }
   });
 
-  // Fetch latest prices + snapshot on startup
-  setTimeout(async () => {
-    // One-time dedup: remove consecutive price_history rows with the same price
-    try {
-      const result = await db.execute(sql`
-        DELETE FROM price_history
-        WHERE id IN (
-          SELECT id FROM (
-            SELECT id,
-              ROUND(CAST(price AS numeric), 4) AS rp,
-              ROUND(CAST(LAG(price) OVER (PARTITION BY asset_id ORDER BY recorded_at) AS numeric), 4) AS prev_rp
-            FROM price_history
-          ) sub
-          WHERE rp = prev_rp
-        )
-      `);
-      const deletedCount = (result as unknown as { rowCount?: number }).rowCount ?? 0;
-      if (deletedCount > 0) {
-        console.log(`Dedup: removed ${deletedCount} duplicate price_history rows`);
-      }
-    } catch (err) {
-      console.error('Price history dedup error:', err);
-    }
-
-    console.log('Running startup price update...');
-    try {
-      const result = await marketDataService.updateAllPrices();
-      console.log(`Startup price update: ${result.updated} updated, ${result.failed} failed`);
-
-      const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
-      console.log(`Startup benchmark update: ${benchmarkResult.updated} updated, ${benchmarkResult.failed} failed`);
-
-      const userRows = await db.select({ id: users.id }).from(users);
-      for (const { id } of userRows) {
-        const snapshot = await performanceService.takeSnapshot(id);
-        if (snapshot) {
-          console.log(`Startup snapshot [${id}]: Value=${snapshot.totalValue}`);
+  // In production, skip startup price update to avoid Yahoo 429 rate limits
+  // and resource exhaustion on free tier. Cron jobs handle scheduled updates.
+  if (process.env.NODE_ENV !== 'production') {
+    setTimeout(async () => {
+      try {
+        const result = await db.execute(sql`
+          DELETE FROM price_history
+          WHERE id IN (
+            SELECT id FROM (
+              SELECT id,
+                ROUND(CAST(price AS numeric), 4) AS rp,
+                ROUND(CAST(LAG(price) OVER (PARTITION BY asset_id ORDER BY recorded_at) AS numeric), 4) AS prev_rp
+              FROM price_history
+            ) sub
+            WHERE rp = prev_rp
+          )
+        `);
+        const deletedCount = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+        if (deletedCount > 0) {
+          console.log(`Dedup: removed ${deletedCount} duplicate price_history rows`);
         }
+      } catch (err) {
+        console.error('Price history dedup error:', err);
       }
 
-      const [{ cnt }] = await db
-        .select({ cnt: sql<number>`COUNT(*)` })
-        .from(schema.priceHistory);
-      if (cnt < 100) {
-        console.log(`Price history sparse (${cnt} records), triggering backfill...`);
-        const backfillResult = await marketDataService.backfillHistoricalPrices();
-        console.log(`Backfill complete: ${backfillResult.updated} filled, ${backfillResult.skipped} skipped, ${backfillResult.failed} failed`);
-      }
+      console.log('Running startup price update...');
+      try {
+        const result = await marketDataService.updateAllPrices();
+        console.log(`Startup price update: ${result.updated} updated, ${result.failed} failed`);
 
-      const bmResult = await benchmarkService.backfillAllBenchmarks();
-      if (bmResult.updated > 0) {
-        console.log(`Benchmark backfill: ${bmResult.updated} filled, ${bmResult.skipped} skipped, ${bmResult.failed} failed`);
+        const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
+        console.log(`Startup benchmark update: ${benchmarkResult.updated} updated, ${benchmarkResult.failed} failed`);
+
+        const userRows = await db.select({ id: users.id }).from(users);
+        for (const { id } of userRows) {
+          const snapshot = await performanceService.takeSnapshot(id);
+          if (snapshot) {
+            console.log(`Startup snapshot [${id}]: Value=${snapshot.totalValue}`);
+          }
+        }
+
+        const [{ cnt }] = await db
+          .select({ cnt: sql<number>`COUNT(*)` })
+          .from(schema.priceHistory);
+        if (cnt < 100) {
+          console.log(`Price history sparse (${cnt} records), triggering backfill...`);
+          const backfillResult = await marketDataService.backfillHistoricalPrices();
+          console.log(`Backfill complete: ${backfillResult.updated} filled, ${backfillResult.skipped} skipped, ${backfillResult.failed} failed`);
+        }
+
+        const bmResult = await benchmarkService.backfillAllBenchmarks();
+        if (bmResult.updated > 0) {
+          console.log(`Benchmark backfill: ${bmResult.updated} filled, ${bmResult.skipped} skipped, ${bmResult.failed} failed`);
+        }
+      } catch (error) {
+        console.error('Startup update error:', error);
       }
-    } catch (error) {
-      console.error('Startup update error:', error);
-    }
-  }, 5000);
+    }, 5000);
+  } else {
+    console.log('Production mode: skipping startup price update (cron will handle it)');
+  }
 
   console.log('Price update scheduler started');
 }
