@@ -18,6 +18,10 @@
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^9.0.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.5.0",
+    "@types/node-cron": "^3.0.11",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
     "fastify": "^4.28.1",
@@ -26,18 +30,14 @@
     "nanoid": "^5.0.7",
     "node-cron": "^3.0.3",
     "postgres": "^3.4.9",
+    "typescript": "^5.5.4",
     "yahoo-finance2": "^3.14.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^22.5.0",
-    "@types/node-cron": "^3.0.11",
     "better-sqlite3": "^12.8.0",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.0",
-    "typescript": "^5.5.4"
+    "tsx": "^4.19.0"
   }
 }
