@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js';
 import type { Transaction, NewTransaction, TransactionType, RealizedGain } from '../db/schema.js';
 
 export interface CreateTransactionInput {
+  userId: string;
   assetId: string;
   type: TransactionType;
   quantity: number;
@@ -54,16 +55,17 @@ export interface LotInfo {
 }
 
 export const transactionService = {
-  async getAll(): Promise<Transaction[]> {
-    return db
-      .select()
+  async getAll(userId: string): Promise<Transaction[]> {
+    const results = await db
+      .select({ transaction: schema.transactions })
       .from(schema.transactions)
-      .orderBy(desc(schema.transactions.transactionDate))
-      .all();
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId))
+      .orderBy(desc(schema.transactions.transactionDate));
+    return results.map((r) => r.transaction);
   },
 
-  async getAllWithAssets(): Promise<TransactionWithAsset[]> {
-    // Drizzle doesn't easily support self-joins with aliases, so do a two-step approach
+  async getAllWithAssets(userId: string): Promise<TransactionWithAsset[]> {
     const results = await db
       .select({
         transaction: schema.transactions,
@@ -76,17 +78,20 @@ export const transactionService = {
       })
       .from(schema.transactions)
       .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
-      .orderBy(desc(schema.transactions.transactionDate))
-      .all();
-
-    // Batch-load fund source names
+      .where(eq(schema.assets.userId, userId))
+      .orderBy(desc(schema.transactions.transactionDate));
     const fundSourceIds = [...new Set(results.map((r) => r.transaction.fundSourceId).filter(Boolean))] as string[];
     const fundSourceMap = new Map<string, { id: string; name: string; symbol: string }>();
     if (fundSourceIds.length > 0) {
-      const fsAssets = await db.select({ id: schema.assets.id, name: schema.assets.name, symbol: schema.assets.symbol })
+      const fsAssets = await db
+        .select({ id: schema.assets.id, name: schema.assets.name, symbol: schema.assets.symbol })
         .from(schema.assets)
-        .where(sql`${schema.assets.id} IN (${sql.join(fundSourceIds.map((id) => sql`${id}`), sql`, `)})`)
-        .all();
+        .where(
+          and(
+            eq(schema.assets.userId, userId),
+            sql`${schema.assets.id} IN (${sql.join(fundSourceIds.map((id) => sql`${id}`), sql`, `)})`
+          )
+        );
       for (const a of fsAssets) fundSourceMap.set(a.id, a);
     }
 
@@ -97,30 +102,53 @@ export const transactionService = {
     }));
   },
 
-  async getById(id: string): Promise<Transaction | undefined> {
+  async getById(userId: string, id: string): Promise<Transaction | undefined> {
     const results = await db
-      .select()
+      .select({ transaction: schema.transactions })
       .from(schema.transactions)
-      .where(eq(schema.transactions.id, id))
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(and(eq(schema.transactions.id, id), eq(schema.assets.userId, userId)))
       .limit(1);
-    return results[0];
+    return results[0]?.transaction;
   },
 
-  async getByAssetId(assetId: string): Promise<Transaction[]> {
+  async getByAssetId(_userId: string, assetId: string): Promise<Transaction[]> {
     return db
       .select()
       .from(schema.transactions)
       .where(eq(schema.transactions.assetId, assetId))
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
+      .orderBy(asc(schema.transactions.transactionDate));
   },
 
-  async create(input: CreateTransactionInput): Promise<Transaction> {
+  async create(userId: string, input: CreateTransactionInput): Promise<Transaction> {
+    if (input.userId !== userId) {
+      throw new Error('User mismatch');
+    }
+
+    const [ownedAsset] = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, input.assetId), eq(schema.assets.userId, userId)))
+      .limit(1);
+    if (!ownedAsset) {
+      throw new Error('Asset not found or access denied');
+    }
+
+    if (input.fundSourceId) {
+      const [fundSrc] = await db
+        .select({ id: schema.assets.id })
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, input.fundSourceId), eq(schema.assets.userId, userId)))
+        .limit(1);
+      if (!fundSrc) {
+        throw new Error('Fund source not found or access denied');
+      }
+    }
+
     const now = new Date();
 
-    // For sell transactions, validate we have enough quantity
     if (input.type === 'sell') {
-      const position = await this.getPositionForAsset(input.assetId);
+      const position = await this.getPositionForAsset(userId, input.assetId);
       if (!position || position.quantity < input.quantity) {
         throw new Error(
           `Insufficient quantity. Available: ${position?.quantity ?? 0}, Requested: ${input.quantity}`
@@ -143,9 +171,9 @@ export const transactionService = {
 
     await db.insert(schema.transactions).values(newTransaction);
 
-    // For sell transactions, process FIFO matching
     if (input.type === 'sell') {
       await this.processFIFOSale(
+        userId,
         newTransaction.id,
         input.assetId,
         input.quantity,
@@ -157,28 +185,24 @@ export const transactionService = {
     return newTransaction as Transaction;
   },
 
-  async delete(id: string): Promise<boolean> {
-    const transaction = await this.getById(id);
+  async delete(userId: string, id: string): Promise<boolean> {
+    const transaction = await this.getById(userId, id);
     if (!transaction) return false;
 
-    // Delete associated realized gains
-    await db
-      .delete(schema.realizedGains)
-      .where(eq(schema.realizedGains.sellTransactionId, id));
+    await db.delete(schema.realizedGains).where(eq(schema.realizedGains.sellTransactionId, id));
 
     await db.delete(schema.transactions).where(eq(schema.transactions.id, id));
     return true;
   },
 
-  // FIFO cost basis matching for sales
   async processFIFOSale(
+    _userId: string,
     sellTransactionId: string,
     assetId: string,
     sellQuantity: number,
     sellPrice: number,
     sellDate: string
   ): Promise<void> {
-    // Get all buy transactions for this asset, ordered by date (oldest first)
     const buyTransactions = await db
       .select()
       .from(schema.transactions)
@@ -188,29 +212,21 @@ export const transactionService = {
           eq(schema.transactions.type, 'buy')
         )
       )
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
-
-    // Get existing realized gains to know what's already been sold
+      .orderBy(asc(schema.transactions.transactionDate));
     const existingGains = await db
       .select()
       .from(schema.realizedGains)
-      .where(eq(schema.realizedGains.assetId, assetId))
-      .all();
-
-    // Calculate remaining quantity for each buy lot
+      .where(eq(schema.realizedGains.assetId, assetId));
     const lotRemaining = new Map<string, number>();
     for (const buy of buyTransactions) {
       lotRemaining.set(buy.id, buy.quantity);
     }
 
-    // Subtract already sold quantities
     for (const gain of existingGains) {
       const current = lotRemaining.get(gain.buyTransactionId) ?? 0;
       lotRemaining.set(gain.buyTransactionId, current - gain.quantity);
     }
 
-    // Match sell against oldest buy lots (FIFO)
     let remainingToSell = sellQuantity;
     const now = new Date();
 
@@ -244,30 +260,25 @@ export const transactionService = {
     }
   },
 
-  // Get current position for an asset (computed from transactions)
-  async getPositionForAsset(assetId: string): Promise<Position | null> {
+  async getPositionForAsset(userId: string, assetId: string): Promise<Position | null> {
     const asset = await db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.id, assetId))
+      .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
       .limit(1)
       .then((r) => r[0]);
 
     if (!asset) return null;
 
-    const transactions = await this.getByAssetId(assetId);
+    const transactions = await this.getByAssetId(userId, assetId);
     const realizedGainsData = await db
       .select()
       .from(schema.realizedGains)
-      .where(eq(schema.realizedGains.assetId, assetId))
-      .all();
-
-    // Calculate position using FIFO
+      .where(eq(schema.realizedGains.assetId, assetId));
     let totalQuantity = 0;
     let totalCost = 0;
     let totalRealizedGain = 0;
 
-    // Track remaining quantity in each buy lot
     const lotRemaining = new Map<string, { quantity: number; price: number }>();
 
     for (const tx of transactions) {
@@ -280,27 +291,21 @@ export const transactionService = {
       }
     }
 
-    // Fund-source adjustments: other transactions that reference this asset as fundSource
     const fundSourceTx = await db
       .select()
       .from(schema.transactions)
-      .where(eq(schema.transactions.fundSourceId, assetId))
-      .all();
-
+      .where(eq(schema.transactions.fundSourceId, assetId));
     for (const tx of fundSourceTx) {
       const amount = tx.quantity * tx.price + (tx.fees ?? 0);
       if (tx.type === 'buy') {
-        // Money LEFT this account to fund a buy elsewhere
         totalQuantity -= amount;
         totalCost -= amount;
       } else {
-        // Money CAME TO this account as proceeds from a sell elsewhere
         totalQuantity += (tx.quantity * tx.price - (tx.fees ?? 0));
         totalCost += (tx.quantity * tx.price - (tx.fees ?? 0));
       }
     }
 
-    // Subtract sold quantities and calculate realized gains
     for (const gain of realizedGainsData) {
       const lot = lotRemaining.get(gain.buyTransactionId);
       if (lot) {
@@ -310,7 +315,6 @@ export const transactionService = {
       totalRealizedGain += gain.gain;
     }
 
-    // Current position cost is sum of remaining lots
     let positionCost = 0;
     for (const [, lot] of lotRemaining) {
       if (lot.quantity > 0) {
@@ -318,7 +322,6 @@ export const transactionService = {
       }
     }
 
-    // For cash/wallet assets, position cost = quantity (1:1 value)
     const isCashLike = ['cash', 'lended', 'fixed_deposit', 'ppf', 'epf'].includes(asset.assetClass);
     const currentPrice = isCashLike ? 1 : (asset.currentPrice ?? 0);
     const effectiveQuantity = isCashLike ? totalQuantity : Math.max(0, totalQuantity);
@@ -337,12 +340,12 @@ export const transactionService = {
       lastActivityDate = lastTx;
     } else {
       const lastPrice = await db
-        .select({ ts: sql<number>`MAX(recorded_at)` })
+        .select({ ts: sql<string>`MAX(recorded_at)` })
         .from(schema.priceHistory)
         .where(eq(schema.priceHistory.assetId, assetId))
         .then((r) => r[0]?.ts ?? null);
       if (lastPrice) {
-        lastActivityDate = new Date(lastPrice * 1000).toISOString();
+        lastActivityDate = new Date(lastPrice).toISOString();
       } else if (asset.lastUpdated) {
         lastActivityDate = new Date(asset.lastUpdated.getTime()).toISOString();
       }
@@ -366,13 +369,15 @@ export const transactionService = {
     };
   },
 
-  // Get all current positions
-  async getAllPositions(): Promise<Position[]> {
-    const assets = await db.select().from(schema.assets).all();
+  async getAllPositions(userId: string): Promise<Position[]> {
+    const assets = await db
+      .select()
+      .from(schema.assets)
+      .where(eq(schema.assets.userId, userId));
     const positions: Position[] = [];
 
     for (const asset of assets) {
-      const position = await this.getPositionForAsset(asset.id);
+      const position = await this.getPositionForAsset(userId, asset.id);
       if (position && position.quantity > 0) {
         positions.push(position);
       }
@@ -381,8 +386,7 @@ export const transactionService = {
     return positions;
   },
 
-  // Get buy lots for an asset (for display)
-  async getBuyLots(assetId: string): Promise<LotInfo[]> {
+  async getBuyLots(_userId: string, assetId: string): Promise<LotInfo[]> {
     const buyTransactions = await db
       .select()
       .from(schema.transactions)
@@ -392,16 +396,11 @@ export const transactionService = {
           eq(schema.transactions.type, 'buy')
         )
       )
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
-
+      .orderBy(asc(schema.transactions.transactionDate));
     const realizedGainsData = await db
       .select()
       .from(schema.realizedGains)
-      .where(eq(schema.realizedGains.assetId, assetId))
-      .all();
-
-    // Calculate remaining quantity for each lot
+      .where(eq(schema.realizedGains.assetId, assetId));
     const soldFromLot = new Map<string, number>();
     for (const gain of realizedGainsData) {
       const current = soldFromLot.get(gain.buyTransactionId) ?? 0;
@@ -417,30 +416,29 @@ export const transactionService = {
     }));
   },
 
-  // Get total realized gains
-  async getTotalRealizedGains(): Promise<number> {
+  async getTotalRealizedGains(userId: string): Promise<number> {
     const result = await db
-      .select({ total: sql<number>`COALESCE(SUM(gain), 0)` })
+      .select({ total: sql<number>`COALESCE(SUM(${schema.realizedGains.gain}), 0)` })
       .from(schema.realizedGains)
-      .all();
+      .innerJoin(schema.assets, eq(schema.realizedGains.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId));
     return result[0]?.total ?? 0;
   },
 
-  // Get realized gains by asset
-  async getRealizedGainsByAsset(assetId: string): Promise<RealizedGain[]> {
-    return db
-      .select()
+  async getRealizedGainsByAsset(userId: string, assetId: string): Promise<RealizedGain[]> {
+    const rows = await db
+      .select({ rg: schema.realizedGains })
       .from(schema.realizedGains)
-      .where(eq(schema.realizedGains.assetId, assetId))
-      .orderBy(desc(schema.realizedGains.realizedDate))
-      .all();
+      .innerJoin(schema.assets, eq(schema.realizedGains.assetId, schema.assets.id))
+      .where(and(eq(schema.realizedGains.assetId, assetId), eq(schema.assets.userId, userId)))
+      .orderBy(desc(schema.realizedGains.realizedDate));
+    return rows.map((r) => r.rg);
   },
 
-  async applySplit(assetId: string, ratio: number): Promise<{ adjustedCount: number }> {
-    const allTx = await this.getByAssetId(assetId);
+  async applySplit(userId: string, assetId: string, ratio: number): Promise<{ adjustedCount: number }> {
+    const allTx = await this.getByAssetId(userId, assetId);
     if (allTx.length === 0) throw new Error('No transactions found for this asset');
 
-    // Adjust all transaction quantities and prices
     for (const tx of allTx) {
       await db
         .update(schema.transactions)
@@ -451,18 +449,13 @@ export const transactionService = {
         .where(eq(schema.transactions.id, tx.id));
     }
 
-    // Adjust price history
     await db
       .update(schema.priceHistory)
       .set({ price: sql`price / ${ratio}` })
       .where(eq(schema.priceHistory.assetId, assetId));
 
-    // Delete all realized gains for this asset — we'll regenerate them
-    await db
-      .delete(schema.realizedGains)
-      .where(eq(schema.realizedGains.assetId, assetId));
+    await db.delete(schema.realizedGains).where(eq(schema.realizedGains.assetId, assetId));
 
-    // Re-fetch adjusted sell transactions and reprocess FIFO
     const sellTx = await db
       .select()
       .from(schema.transactions)
@@ -472,11 +465,10 @@ export const transactionService = {
           eq(schema.transactions.type, 'sell')
         )
       )
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
-
+      .orderBy(asc(schema.transactions.transactionDate));
     for (const sell of sellTx) {
       await this.processFIFOSale(
+        userId,
         sell.id,
         assetId,
         sell.quantity,
@@ -488,8 +480,7 @@ export const transactionService = {
     return { adjustedCount: allTx.length };
   },
 
-  /** Delete realized gain rows for an asset and re-run FIFO for all sells (oldest sell first). */
-  async rebuildRealizedGainsForAsset(assetId: string): Promise<void> {
+  async rebuildRealizedGainsForAsset(userId: string, assetId: string): Promise<void> {
     await db.delete(schema.realizedGains).where(eq(schema.realizedGains.assetId, assetId));
 
     const sellTx = await db
@@ -498,11 +489,10 @@ export const transactionService = {
       .where(
         and(eq(schema.transactions.assetId, assetId), eq(schema.transactions.type, 'sell'))
       )
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
-
+      .orderBy(asc(schema.transactions.transactionDate));
     for (const sell of sellTx) {
       await this.processFIFOSale(
+        userId,
         sell.id,
         assetId,
         sell.quantity,

@@ -1,9 +1,10 @@
-import { eq, and, inArray, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { Asset, NewAsset, AssetClass, Provider } from '../db/schema.js';
 
 export interface CreateAssetInput {
+  userId: string;
   symbol: string;
   name: string;
   assetClass: AssetClass;
@@ -29,12 +30,18 @@ export interface UpdateAssetInput {
 }
 
 export const assetService = {
-  async getAll(): Promise<Asset[]> {
-    return db.select().from(schema.assets).all();
+  async getAll(userId: string): Promise<Asset[]> {
+    return db
+      .select()
+      .from(schema.assets)
+      .where(eq(schema.assets.userId, userId));
   },
 
-  async getAllWithTags() {
-    const assets = await db.select().from(schema.assets).all();
+  async getAllWithTags(userId: string) {
+    const assets = await db
+      .select()
+      .from(schema.assets)
+      .where(eq(schema.assets.userId, userId));
     const allAssetTags = await db
       .select({ assetId: schema.assetTags.assetId, tag: schema.tags })
       .from(schema.assetTags)
@@ -53,47 +60,49 @@ export const assetService = {
     }));
   },
 
-  async getById(id: string): Promise<Asset | undefined> {
+  async getById(userId: string, id: string): Promise<Asset | undefined> {
     const results = await db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.id, id))
+      .where(and(eq(schema.assets.id, id), eq(schema.assets.userId, userId)))
       .limit(1);
     return results[0];
   },
 
-  async getBySymbol(symbol: string): Promise<Asset | undefined> {
+  async getBySymbol(userId: string, symbol: string): Promise<Asset | undefined> {
     const results = await db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.symbol, symbol.toUpperCase()))
+      .where(
+        and(eq(schema.assets.symbol, symbol.toUpperCase()), eq(schema.assets.userId, userId))
+      )
       .limit(1);
     return results[0];
   },
 
-  async getByIsin(isin: string): Promise<Asset | undefined> {
+  async getByIsin(userId: string, isin: string): Promise<Asset | undefined> {
     const i = isin.trim().toUpperCase();
     if (!i) return undefined;
     const results = await db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.isin, i))
+      .where(and(eq(schema.assets.isin, i), eq(schema.assets.userId, userId)))
       .limit(1);
     return results[0];
   },
 
-  async getByAssetClass(assetClass: AssetClass): Promise<Asset[]> {
+  async getByAssetClass(userId: string, assetClass: AssetClass): Promise<Asset[]> {
     return db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.assetClass, assetClass))
-      .all();
+      .where(and(eq(schema.assets.assetClass, assetClass), eq(schema.assets.userId, userId)));
   },
 
   async create(input: CreateAssetInput): Promise<Asset> {
     const now = new Date();
     const newAsset: NewAsset = {
       id: nanoid(),
+      userId: input.userId,
       symbol: input.symbol.toUpperCase(),
       isin: input.isin?.trim().toUpperCase() ?? null,
       name: input.name,
@@ -112,8 +121,12 @@ export const assetService = {
     return newAsset as Asset;
   },
 
-  async update(id: string, input: UpdateAssetInput): Promise<Asset | undefined> {
-    const existing = await this.getById(id);
+  async update(
+    userId: string,
+    id: string,
+    input: UpdateAssetInput
+  ): Promise<Asset | undefined> {
+    const existing = await this.getById(userId, id);
     if (!existing) return undefined;
 
     const updates: Partial<Asset> = {};
@@ -135,25 +148,44 @@ export const assetService = {
       await db
         .update(schema.assets)
         .set(updates)
-        .where(eq(schema.assets.id, id));
+        .where(and(eq(schema.assets.id, id), eq(schema.assets.userId, userId)));
     }
 
-    return this.getById(id);
+    return this.getById(userId, id);
   },
 
-  async updateSymbol(id: string, newSymbol: string): Promise<Asset | undefined> {
-    const existing = await this.getById(id);
+  async updateSymbol(userId: string, id: string, newSymbol: string): Promise<Asset | undefined> {
+    const existing = await this.getById(userId, id);
     if (!existing) return undefined;
 
     await db
       .update(schema.assets)
       .set({ symbol: newSymbol.toUpperCase() })
-      .where(eq(schema.assets.id, id));
+      .where(and(eq(schema.assets.id, id), eq(schema.assets.userId, userId)));
 
-    return this.getById(id);
+    return this.getById(userId, id);
   },
 
-  async updatePrice(id: string, price: number, marketTime?: Date, previousClose?: number): Promise<void> {
+  async updatePrice(
+    id: string,
+    price: number,
+    marketTime?: Date,
+    previousClose?: number,
+    userId?: string
+  ): Promise<void> {
+    const assetWhere =
+      userId != null
+        ? and(eq(schema.assets.id, id), eq(schema.assets.userId, userId))
+        : eq(schema.assets.id, id);
+
+    const assetExists = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(assetWhere)
+      .limit(1)
+      .then((r) => r[0]);
+    if (!assetExists) return;
+
     const now = new Date();
     // Yahoo returns regularMarketTime for US/IN equities & ETFs; invalid/missing → fetch time
     const quoteTime =
@@ -162,10 +194,7 @@ export const assetService = {
     const updates: Record<string, unknown> = { currentPrice: price, lastUpdated: now };
     if (previousClose != null) updates.previousClose = previousClose;
 
-    await db
-      .update(schema.assets)
-      .set(updates)
-      .where(eq(schema.assets.id, id));
+    await db.update(schema.assets).set(updates).where(assetWhere);
 
     const lastEntry = await db
       .select({
@@ -211,30 +240,35 @@ export const assetService = {
     }
   },
 
-  async delete(id: string): Promise<boolean> {
+  async delete(userId: string, id: string): Promise<boolean> {
+    const existing = await this.getById(userId, id);
+    if (!existing) return false;
+
     // Delete related data first (cascade manually since SQLite foreign keys might not work)
     // Delete realized gains for this asset
     await db.delete(schema.realizedGains).where(eq(schema.realizedGains.assetId, id));
-    
+
     // Delete transactions for this asset
     await db.delete(schema.transactions).where(eq(schema.transactions.assetId, id));
-    
+
     // Delete holdings for this asset
     await db.delete(schema.holdings).where(eq(schema.holdings.assetId, id));
-    
+
     // Delete asset tags
     await db.delete(schema.assetTags).where(eq(schema.assetTags.assetId, id));
-    
+
     // Delete price history
     await db.delete(schema.priceHistory).where(eq(schema.priceHistory.assetId, id));
-    
+
     // Finally delete the asset
-    await db.delete(schema.assets).where(eq(schema.assets.id, id));
+    await db
+      .delete(schema.assets)
+      .where(and(eq(schema.assets.id, id), eq(schema.assets.userId, userId)));
     return true;
   },
 
-  async getWithTags(id: string) {
-    const asset = await this.getById(id);
+  async getWithTags(userId: string, id: string) {
+    const asset = await this.getById(userId, id);
     if (!asset) return undefined;
 
     const tagResults = await db

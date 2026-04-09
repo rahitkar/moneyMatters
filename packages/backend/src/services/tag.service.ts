@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { Tag, NewTag } from '../db/schema.js';
@@ -16,32 +16,36 @@ export interface UpdateTagInput {
 }
 
 export const tagService = {
-  async getAll(): Promise<Tag[]> {
-    return db.select().from(schema.tags).all();
+  async getAll(userId: string): Promise<Tag[]> {
+    return db
+      .select()
+      .from(schema.tags)
+      .where(eq(schema.tags.userId, userId));
   },
 
-  async getById(id: string): Promise<Tag | undefined> {
+  async getById(userId: string, id: string): Promise<Tag | undefined> {
     const results = await db
       .select()
       .from(schema.tags)
-      .where(eq(schema.tags.id, id))
+      .where(and(eq(schema.tags.id, id), eq(schema.tags.userId, userId)))
       .limit(1);
     return results[0];
   },
 
-  async getByName(name: string): Promise<Tag | undefined> {
+  async getByName(userId: string, name: string): Promise<Tag | undefined> {
     const results = await db
       .select()
       .from(schema.tags)
-      .where(eq(schema.tags.name, name))
+      .where(and(eq(schema.tags.name, name), eq(schema.tags.userId, userId)))
       .limit(1);
     return results[0];
   },
 
-  async create(input: CreateTagInput): Promise<Tag> {
+  async create(userId: string, input: CreateTagInput): Promise<Tag> {
     const now = new Date();
     const newTag: NewTag = {
       id: nanoid(),
+      userId,
       name: input.name,
       color: input.color ?? '#6366f1',
       description: input.description ?? null,
@@ -52,8 +56,12 @@ export const tagService = {
     return newTag as Tag;
   },
 
-  async update(id: string, input: UpdateTagInput): Promise<Tag | undefined> {
-    const existing = await this.getById(id);
+  async update(
+    userId: string,
+    id: string,
+    input: UpdateTagInput
+  ): Promise<Tag | undefined> {
+    const existing = await this.getById(userId, id);
     if (!existing) return undefined;
 
     const updates: Partial<Tag> = {};
@@ -62,31 +70,38 @@ export const tagService = {
     if (input.description !== undefined) updates.description = input.description;
 
     if (Object.keys(updates).length > 0) {
-      await db.update(schema.tags).set(updates).where(eq(schema.tags.id, id));
+      await db
+        .update(schema.tags)
+        .set(updates)
+        .where(and(eq(schema.tags.id, id), eq(schema.tags.userId, userId)));
     }
 
-    return this.getById(id);
+    return this.getById(userId, id);
   },
 
-  async delete(id: string): Promise<boolean> {
-    await db.delete(schema.tags).where(eq(schema.tags.id, id));
+  async delete(userId: string, id: string): Promise<boolean> {
+    await db
+      .delete(schema.tags)
+      .where(and(eq(schema.tags.id, id), eq(schema.tags.userId, userId)));
     return true;
   },
 
-  async getAssetsByTag(tagId: string) {
+  async getAssetsByTag(userId: string, tagId: string) {
     return db
       .select({ asset: schema.assets })
       .from(schema.assetTags)
       .innerJoin(schema.assets, eq(schema.assetTags.assetId, schema.assets.id))
-      .where(eq(schema.assetTags.tagId, tagId))
-      .all();
+      .innerJoin(schema.tags, eq(schema.assetTags.tagId, schema.tags.id))
+      .where(
+        and(eq(schema.assetTags.tagId, tagId), eq(schema.tags.userId, userId))
+      );
   },
 
-  async getTagsWithAssetCount() {
-    const tags = await this.getAll();
+  async getTagsWithAssetCount(userId: string) {
+    const tags = await this.getAll(userId);
     const counts = await Promise.all(
       tags.map(async (tag) => {
-        const assets = await this.getAssetsByTag(tag.id);
+        const assets = await this.getAssetsByTag(userId, tag.id);
         return {
           ...tag,
           assetCount: assets.length,

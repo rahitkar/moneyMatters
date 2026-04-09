@@ -3,7 +3,8 @@ import { sql } from 'drizzle-orm';
 import { marketDataService } from './market-data.service.js';
 import { performanceService } from './performance.service.js';
 import { benchmarkService } from './benchmark.service.js';
-import { db, schema, sqlite } from '../db/index.js';
+import { db, schema } from '../db/index.js';
+import { users } from '../db/schema.js';
 
 let snapshotTask: cron.ScheduledTask | null = null;
 let indianMarketTask: cron.ScheduledTask | null = null;
@@ -34,9 +35,12 @@ export function startPriceUpdateScheduler() {
       const bmResult = await benchmarkService.updateAllBenchmarkPrices();
       console.log(`Daily benchmark update: ${bmResult.updated} updated, ${bmResult.failed} failed`);
 
-      const snapshot = await performanceService.takeSnapshot();
-      if (snapshot) {
-        console.log(`Snapshot taken: Value=${snapshot.totalValue}, Cost=${snapshot.totalCost}`);
+      const userRows = await db.select({ id: users.id }).from(users);
+      for (const { id } of userRows) {
+        const snapshot = await performanceService.takeSnapshot(id);
+        if (snapshot) {
+          console.log(`Snapshot [${id}]: Value=${snapshot.totalValue}, Cost=${snapshot.totalCost}`);
+        }
       }
     } catch (error) {
       console.error('Daily refresh/snapshot error:', error);
@@ -47,20 +51,21 @@ export function startPriceUpdateScheduler() {
   setTimeout(async () => {
     // One-time dedup: remove consecutive price_history rows with the same price
     try {
-      const deleted = sqlite.prepare(`
+      const result = await db.execute(sql`
         DELETE FROM price_history
         WHERE id IN (
           SELECT id FROM (
             SELECT id,
-              ROUND(price, 4) AS rp,
-              ROUND(LAG(price) OVER (PARTITION BY asset_id ORDER BY recorded_at), 4) AS prev_rp
+              ROUND(CAST(price AS numeric), 4) AS rp,
+              ROUND(CAST(LAG(price) OVER (PARTITION BY asset_id ORDER BY recorded_at) AS numeric), 4) AS prev_rp
             FROM price_history
-          )
+          ) sub
           WHERE rp = prev_rp
         )
-      `).run();
-      if (deleted.changes > 0) {
-        console.log(`Dedup: removed ${deleted.changes} duplicate price_history rows`);
+      `);
+      const deletedCount = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+      if (deletedCount > 0) {
+        console.log(`Dedup: removed ${deletedCount} duplicate price_history rows`);
       }
     } catch (err) {
       console.error('Price history dedup error:', err);
@@ -74,15 +79,17 @@ export function startPriceUpdateScheduler() {
       const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
       console.log(`Startup benchmark update: ${benchmarkResult.updated} updated, ${benchmarkResult.failed} failed`);
 
-      const snapshot = await performanceService.takeSnapshot();
-      if (snapshot) {
-        console.log(`Startup snapshot: Value=${snapshot.totalValue}`);
+      const userRows = await db.select({ id: users.id }).from(users);
+      for (const { id } of userRows) {
+        const snapshot = await performanceService.takeSnapshot(id);
+        if (snapshot) {
+          console.log(`Startup snapshot [${id}]: Value=${snapshot.totalValue}`);
+        }
       }
 
       const [{ cnt }] = await db
         .select({ cnt: sql<number>`COUNT(*)` })
-        .from(schema.priceHistory)
-        .all();
+        .from(schema.priceHistory);
       if (cnt < 100) {
         console.log(`Price history sparse (${cnt} records), triggering backfill...`);
         const backfillResult = await marketDataService.backfillHistoricalPrices();
@@ -117,11 +124,16 @@ export async function triggerManualPriceUpdate() {
   console.log('Manual price update triggered...');
   const priceResult = await marketDataService.updateAllPrices();
   const benchmarkResult = await benchmarkService.updateAllBenchmarkPrices();
-  const snapshot = await performanceService.takeSnapshot();
-  
+  const userRows = await db.select({ id: users.id }).from(users);
+  const snapshots: Awaited<ReturnType<typeof performanceService.takeSnapshot>>[] = [];
+  for (const { id } of userRows) {
+    const s = await performanceService.takeSnapshot(id);
+    if (s) snapshots.push(s);
+  }
+
   return {
     prices: priceResult,
     benchmarks: benchmarkResult,
-    snapshot,
+    snapshots,
   };
 }

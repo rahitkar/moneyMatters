@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 
 /**
@@ -62,14 +62,14 @@ export function getCycleDateRange(
 }
 
 /**
- * Read the persisted cycle start day from app_settings.
+ * Read the persisted cycle start day from app_settings for the given user.
  * Returns 1 (calendar month) when not configured.
  */
-export async function getCycleStartDay(): Promise<number> {
+export async function getCycleStartDay(userId: string): Promise<number> {
   const row = await db
     .select()
     .from(schema.appSettings)
-    .where(eq(schema.appSettings.key, 'cycleStartDay'))
+    .where(and(eq(schema.appSettings.key, 'cycleStartDay'), eq(schema.appSettings.userId, userId)))
     .limit(1)
     .then((r) => r[0]);
   return row ? parseInt(row.value, 10) || 1 : 1;

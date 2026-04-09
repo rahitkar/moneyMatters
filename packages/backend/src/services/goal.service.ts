@@ -1,4 +1,4 @@
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { NetWorthTarget } from '../db/schema.js';
@@ -41,27 +41,28 @@ function generateMonths(start: string, end: string): string[] {
 }
 
 export const goalService = {
-  async getTargets(): Promise<NetWorthTarget[]> {
+  async getTargets(userId: string): Promise<NetWorthTarget[]> {
     return db
       .select()
       .from(schema.netWorthTargets)
-      .orderBy(desc(schema.netWorthTargets.createdAt))
-      .all();
+      .where(eq(schema.netWorthTargets.userId, userId))
+      .orderBy(desc(schema.netWorthTargets.createdAt));
   },
 
-  async getTargetById(id: string): Promise<NetWorthTarget | null> {
+  async getTargetById(userId: string, id: string): Promise<NetWorthTarget | null> {
     return db
       .select()
       .from(schema.netWorthTargets)
-      .where(eq(schema.netWorthTargets.id, id))
+      .where(and(eq(schema.netWorthTargets.id, id), eq(schema.netWorthTargets.userId, userId)))
       .limit(1)
       .then((r) => r[0] ?? null);
   },
 
-  async createTarget(input: CreateTargetInput): Promise<NetWorthTarget> {
+  async createTarget(userId: string, input: CreateTargetInput): Promise<NetWorthTarget> {
     const id = nanoid();
     await db.insert(schema.netWorthTargets).values({
       id,
+      userId,
       name: input.name,
       startingValue: input.startingValue,
       monthlyInvestment: input.monthlyInvestment,
@@ -72,11 +73,11 @@ export const goalService = {
       isActive: true,
       createdAt: new Date(),
     });
-    return (await this.getTargetById(id))!;
+    return (await this.getTargetById(userId, id))!;
   },
 
-  async updateTarget(id: string, input: UpdateTargetInput): Promise<NetWorthTarget | null> {
-    const existing = await this.getTargetById(id);
+  async updateTarget(userId: string, id: string, input: UpdateTargetInput): Promise<NetWorthTarget | null> {
+    const existing = await this.getTargetById(userId, id);
     if (!existing) return null;
 
     const updates: Record<string, unknown> = {};
@@ -93,19 +94,19 @@ export const goalService = {
       await db
         .update(schema.netWorthTargets)
         .set(updates as any)
-        .where(eq(schema.netWorthTargets.id, id));
+        .where(and(eq(schema.netWorthTargets.id, id), eq(schema.netWorthTargets.userId, userId)));
     }
-    return this.getTargetById(id);
+    return this.getTargetById(userId, id);
   },
 
-  async deleteTarget(id: string): Promise<boolean> {
+  async deleteTarget(userId: string, id: string): Promise<boolean> {
     const result = await db
       .delete(schema.netWorthTargets)
-      .where(eq(schema.netWorthTargets.id, id));
+      .where(and(eq(schema.netWorthTargets.id, id), eq(schema.netWorthTargets.userId, userId)));
     return (result as any).changes > 0;
   },
 
-  async getProjection(id: string): Promise<{
+  async getProjection(userId: string, id: string): Promise<{
     target: NetWorthTarget;
     params: {
       totalYearlyInvestment: number;
@@ -115,7 +116,7 @@ export const goalService = {
     };
     rows: ProjectionRow[];
   } | null> {
-    const target = await this.getTargetById(id);
+    const target = await this.getTargetById(userId, id);
     if (!target) return null;
 
     const months = generateMonths(target.startDate, target.endDate);
@@ -126,7 +127,7 @@ export const goalService = {
     const snapshots = await db
       .select()
       .from(schema.portfolioSnapshots)
-      .all();
+      .where(eq(schema.portfolioSnapshots.userId, userId));
     const snapshotMap = new Map<string, number>();
     for (const s of snapshots) {
       const ym = s.snapshotDate.slice(0, 7); // YYYY-MM

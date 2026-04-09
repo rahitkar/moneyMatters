@@ -187,7 +187,7 @@ export const marketDataService = {
     exchangeRateProvider.invalidateRate('USD', 'INR');
     await exchangeRateProvider.getRate('USD', 'INR');
 
-    const assets = await assetService.getAll();
+    const assets = await db.select().from(schema.assets);
     let updated = 0;
     let failed = 0;
 
@@ -325,7 +325,7 @@ export const marketDataService = {
   },
 
   async backfillHistoricalPrices(): Promise<{ updated: number; skipped: number; failed: number }> {
-    const assets = await assetService.getAll();
+    const assets = await db.select().from(schema.assets);
     let updated = 0;
     let skipped = 0;
     let failed = 0;
@@ -336,8 +336,7 @@ export const marketDataService = {
         minDate: sql<string>`MIN(${schema.transactions.transactionDate})`,
       })
       .from(schema.transactions)
-      .groupBy(schema.transactions.assetId)
-      .all();
+      .groupBy(schema.transactions.assetId);
     const firstDateMap = new Map(firstTxDates.map((r) => [r.assetId, r.minDate]));
 
     const existingCounts = await db
@@ -346,8 +345,7 @@ export const marketDataService = {
         cnt: sql<number>`COUNT(*)`,
       })
       .from(schema.priceHistory)
-      .groupBy(schema.priceHistory.assetId)
-      .all();
+      .groupBy(schema.priceHistory.assetId);
     const countMap = new Map(existingCounts.map((r) => [r.assetId, r.cnt]));
 
     const today = new Date();
@@ -396,7 +394,6 @@ export const marketDataService = {
             .select({ d: sql<string>`date(${schema.priceHistory.recordedAt}, 'unixepoch')` })
             .from(schema.priceHistory)
             .where(eq(schema.priceHistory.assetId, asset.id))
-            .all()
           ).map((r) => r.d)
         );
 

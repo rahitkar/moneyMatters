@@ -25,7 +25,7 @@ export async function performanceRoutes(fastify: FastifyInstance) {
     '/portfolio',
     async (request) => {
       const interval = intervalSchema.parse(request.query.interval);
-      const performance = await performanceService.getPortfolioPerformance(interval);
+      const performance = await performanceService.getPortfolioPerformance(request.userId, interval);
       return { performance };
     }
   );
@@ -39,7 +39,7 @@ export async function performanceRoutes(fastify: FastifyInstance) {
       if (!ALLOC_DIMENSIONS.includes(dim)) {
         return { series: [] };
       }
-      return performanceService.buildValueHistoryByDimension(interval, dim);
+      return performanceService.buildValueHistoryByDimension(request.userId, interval, dim);
     }
   );
 
@@ -59,6 +59,7 @@ export async function performanceRoutes(fastify: FastifyInstance) {
         : undefined;
 
       const comparison = await performanceService.compareWithBenchmarks(
+        request.userId,
         interval,
         benchmarkSymbols,
         segments,
@@ -74,7 +75,10 @@ export async function performanceRoutes(fastify: FastifyInstance) {
     '/by-asset-class',
     async (request) => {
       const interval = intervalSchema.parse(request.query.interval);
-      const performance = await performanceService.getPerformanceByAssetClass(interval);
+      const performance = await performanceService.getPerformanceByAssetClass(
+        request.userId,
+        interval
+      );
       return { performance };
     }
   );
@@ -89,7 +93,10 @@ export async function performanceRoutes(fastify: FastifyInstance) {
       }
 
       const interval = intervalSchema.parse(request.query.interval);
-      const allPerformance = await performanceService.getPerformanceByAssetClass(interval);
+      const allPerformance = await performanceService.getPerformanceByAssetClass(
+        request.userId,
+        interval
+      );
       const classPerformance = allPerformance.find((p) => p.assetClass === assetClass);
 
       if (!classPerformance) {
@@ -106,6 +113,7 @@ export async function performanceRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const interval = intervalSchema.parse(request.query.interval);
       const performance = await performanceService.getPerformanceByTag(
+        request.userId,
         request.params.tagId,
         interval
       );
@@ -123,14 +131,14 @@ export async function performanceRoutes(fastify: FastifyInstance) {
     '/snapshots',
     async (request) => {
       const interval = intervalSchema.parse(request.query.interval);
-      const snapshots = await performanceService.getSnapshots(interval);
+      const snapshots = await performanceService.getSnapshots(request.userId, interval);
       return { snapshots };
     }
   );
 
   // Manually trigger a portfolio snapshot
-  fastify.post('/snapshot', async () => {
-    const snapshot = await performanceService.takeSnapshot();
+  fastify.post('/snapshot', async (request) => {
+    const snapshot = await performanceService.takeSnapshot(request.userId);
     return { snapshot };
   });
 }

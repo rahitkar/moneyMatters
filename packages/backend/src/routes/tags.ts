@@ -16,20 +16,20 @@ const updateTagSchema = z.object({
 
 export async function tagRoutes(fastify: FastifyInstance) {
   // Get all tags
-  fastify.get('/', async () => {
-    const tags = await tagService.getAll();
+  fastify.get('/', async (request) => {
+    const tags = await tagService.getAll(request.userId);
     return { tags };
   });
 
   // Get all tags with asset counts
-  fastify.get('/with-counts', async () => {
-    const tags = await tagService.getTagsWithAssetCount();
+  fastify.get('/with-counts', async (request) => {
+    const tags = await tagService.getTagsWithAssetCount(request.userId);
     return { tags };
   });
 
   // Get tag by ID
   fastify.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const tag = await tagService.getById(request.params.id);
+    const tag = await tagService.getById(request.userId, request.params.id);
     if (!tag) {
       return reply.status(404).send({ error: 'Tag not found' });
     }
@@ -38,12 +38,12 @@ export async function tagRoutes(fastify: FastifyInstance) {
 
   // Get assets by tag
   fastify.get<{ Params: { id: string } }>('/:id/assets', async (request, reply) => {
-    const tag = await tagService.getById(request.params.id);
+    const tag = await tagService.getById(request.userId, request.params.id);
     if (!tag) {
       return reply.status(404).send({ error: 'Tag not found' });
     }
 
-    const assets = await tagService.getAssetsByTag(request.params.id);
+    const assets = await tagService.getAssetsByTag(request.userId, request.params.id);
     return { tag, assets: assets.map((a) => a.asset) };
   });
 
@@ -57,7 +57,7 @@ export async function tagRoutes(fastify: FastifyInstance) {
       }
 
       // Check if tag with same name exists
-      const existing = await tagService.getByName(validation.data.name);
+      const existing = await tagService.getByName(request.userId, validation.data.name);
       if (existing) {
         return reply.status(409).send({ 
           error: 'Tag with this name already exists',
@@ -65,7 +65,7 @@ export async function tagRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const tag = await tagService.create(validation.data);
+      const tag = await tagService.create(request.userId, validation.data);
       return reply.status(201).send({ tag });
     }
   );
@@ -81,7 +81,7 @@ export async function tagRoutes(fastify: FastifyInstance) {
 
       // Check for duplicate name if name is being changed
       if (validation.data.name) {
-        const existing = await tagService.getByName(validation.data.name);
+        const existing = await tagService.getByName(request.userId, validation.data.name);
         if (existing && existing.id !== request.params.id) {
           return reply.status(409).send({ 
             error: 'Tag with this name already exists' 
@@ -89,7 +89,7 @@ export async function tagRoutes(fastify: FastifyInstance) {
         }
       }
 
-      const tag = await tagService.update(request.params.id, validation.data);
+      const tag = await tagService.update(request.userId, request.params.id, validation.data);
       if (!tag) {
         return reply.status(404).send({ error: 'Tag not found' });
       }
@@ -100,12 +100,12 @@ export async function tagRoutes(fastify: FastifyInstance) {
 
   // Delete tag
   fastify.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const tag = await tagService.getById(request.params.id);
+    const tag = await tagService.getById(request.userId, request.params.id);
     if (!tag) {
       return reply.status(404).send({ error: 'Tag not found' });
     }
 
-    await tagService.delete(request.params.id);
+    await tagService.delete(request.userId, request.params.id);
     return { success: true };
   });
 }

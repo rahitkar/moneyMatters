@@ -18,8 +18,8 @@ const updateTargetSchema = createTargetSchema.partial().extend({
 
 export async function goalRoutes(fastify: FastifyInstance) {
   // List all targets
-  fastify.get('/targets', async () => {
-    const targets = await goalService.getTargets();
+  fastify.get('/targets', async (request) => {
+    const targets = await goalService.getTargets(request.userId);
     return { targets };
   });
 
@@ -27,7 +27,7 @@ export async function goalRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { id: string } }>(
     '/targets/:id',
     async (request, reply) => {
-      const target = await goalService.getTargetById(request.params.id);
+      const target = await goalService.getTargetById(request.userId, request.params.id);
       if (!target) return reply.status(404).send({ error: 'Target not found' });
       return { target };
     },
@@ -39,7 +39,7 @@ export async function goalRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = createTargetSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const target = await goalService.createTarget(v.data);
+      const target = await goalService.createTarget(request.userId, v.data);
       return { target };
     },
   );
@@ -50,7 +50,7 @@ export async function goalRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = updateTargetSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const target = await goalService.updateTarget(request.params.id, v.data);
+      const target = await goalService.updateTarget(request.userId, request.params.id, v.data);
       if (!target) return reply.status(404).send({ error: 'Target not found' });
       return { target };
     },
@@ -60,7 +60,7 @@ export async function goalRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string } }>(
     '/targets/:id',
     async (request, reply) => {
-      const ok = await goalService.deleteTarget(request.params.id);
+      const ok = await goalService.deleteTarget(request.userId, request.params.id);
       if (!ok) return reply.status(404).send({ error: 'Target not found' });
       return { success: true };
     },
@@ -70,7 +70,7 @@ export async function goalRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { id: string } }>(
     '/targets/:id/projection',
     async (request, reply) => {
-      const projection = await goalService.getProjection(request.params.id);
+      const projection = await goalService.getProjection(request.userId, request.params.id);
       if (!projection) return reply.status(404).send({ error: 'Target not found' });
       return { projection };
     },

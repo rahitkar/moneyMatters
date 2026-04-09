@@ -1,4 +1,4 @@
-import { eq, desc, sql, gte, lte } from 'drizzle-orm';
+import { eq, desc, sql, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { FireSimulation } from '../db/schema.js';
@@ -154,34 +154,42 @@ const REFERENCE_SCENARIOS: FireSimulationInput[] = [
 ];
 
 export const fireService = {
-  async getAll(): Promise<FireSimulation[]> {
+  async getAll(userId: string): Promise<FireSimulation[]> {
     const SORT_ORDER: Record<string, number> = { 'Base FIRE': 0, 'Lean FIRE': 1, 'Fat FIRE': 2 };
-    const all = await db.select().from(schema.fireSimulations).all();
+    const all = await db
+      .select()
+      .from(schema.fireSimulations)
+      .where(eq(schema.fireSimulations.userId, userId));
     return all.sort((a, b) => (SORT_ORDER[a.name] ?? 99) - (SORT_ORDER[b.name] ?? 99));
   },
 
-  async getById(id: string): Promise<FireSimulation | null> {
+  async getById(userId: string, id: string): Promise<FireSimulation | null> {
     return db
       .select()
       .from(schema.fireSimulations)
-      .where(eq(schema.fireSimulations.id, id))
+      .where(and(eq(schema.fireSimulations.id, id), eq(schema.fireSimulations.userId, userId)))
       .limit(1)
       .then((r) => r[0] ?? null);
   },
 
-  async create(input: FireSimulationInput): Promise<FireSimulation> {
+  async create(userId: string, input: FireSimulationInput): Promise<FireSimulation> {
     const id = nanoid();
     await db.insert(schema.fireSimulations).values({
       id,
+      userId,
       ...input,
       isActive: true,
       createdAt: new Date(),
     });
-    return (await this.getById(id))!;
+    return (await this.getById(userId, id))!;
   },
 
-  async update(id: string, input: Partial<FireSimulationInput> & { isActive?: boolean }): Promise<FireSimulation | null> {
-    const existing = await this.getById(id);
+  async update(
+    userId: string,
+    id: string,
+    input: Partial<FireSimulationInput> & { isActive?: boolean },
+  ): Promise<FireSimulation | null> {
+    const existing = await this.getById(userId, id);
     if (!existing) return null;
 
     const updates: Record<string, unknown> = {};
@@ -193,25 +201,28 @@ export const fireService = {
       await db
         .update(schema.fireSimulations)
         .set(updates as any)
-        .where(eq(schema.fireSimulations.id, id));
+        .where(and(eq(schema.fireSimulations.id, id), eq(schema.fireSimulations.userId, userId)));
     }
-    return this.getById(id);
+    return this.getById(userId, id);
   },
 
-  async delete(id: string): Promise<boolean> {
+  async delete(userId: string, id: string): Promise<boolean> {
     const result = await db
       .delete(schema.fireSimulations)
-      .where(eq(schema.fireSimulations.id, id));
+      .where(and(eq(schema.fireSimulations.id, id), eq(schema.fireSimulations.userId, userId)));
     return (result as any).changes > 0;
   },
 
-  async getSimulationResult(id: string): Promise<FireSimulationResult | null> {
-    const sim = await this.getById(id);
+  async getSimulationResult(userId: string, id: string): Promise<FireSimulationResult | null> {
+    const sim = await this.getById(userId, id);
     if (!sim) return null;
     return { simulation: sim, ...runSimulation(sim) };
   },
 
-  computeFromInputs(input: FireSimulationInput & { id?: string }): Omit<FireSimulationResult, 'simulation'> & { simulation: FireSimulationInput } {
+  computeFromInputs(
+    userId: string,
+    input: FireSimulationInput & { id?: string },
+  ): Omit<FireSimulationResult, 'simulation'> & { simulation: FireSimulationInput } {
     const sim = {
       id: input.id ?? 'preview',
       ...input,
@@ -223,8 +234,8 @@ export const fireService = {
 
   // ── Reference FIRE scenarios from Excel baseline ────────────────
 
-  async autoSeedScenarios(): Promise<{ created: number; updated: number }> {
-    const existing = await this.getAll();
+  async autoSeedScenarios(userId: string): Promise<{ created: number; updated: number }> {
+    const existing = await this.getAll(userId);
 
     let created = 0;
     let updated = 0;
@@ -233,10 +244,10 @@ export const fireService = {
       const match = existing.find((s) => s.name === scen.name);
       if (match) {
         // Full upsert — reset all params to Excel reference values
-        await this.update(match.id, { ...scen });
+        await this.update(userId, match.id, { ...scen });
         updated++;
       } else {
-        await this.create(scen);
+        await this.create(userId, scen);
         created++;
       }
     }
@@ -244,13 +255,16 @@ export const fireService = {
   },
 
   // Sync only currentSavings from live portfolio (Base/Lean/Fat)
-  async syncPortfolio(): Promise<{ synced: number; liveValue: number }> {
-    const existing = await this.getAll();
-    const portfolioValue = await this._getCurrentPortfolioValue();
+  async syncPortfolio(userId: string): Promise<{ synced: number; liveValue: number }> {
+    const existing = await this.getAll(userId);
+    const portfolioValue = await this._getCurrentPortfolioValue(userId);
     const SYNCED = new Set(['Base FIRE', 'Lean FIRE', 'Fat FIRE']);
     let synced = 0;
 
-    const dobRow = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, 'dob')).get();
+    const [dobRow] = await db
+      .select()
+      .from(schema.appSettings)
+      .where(and(eq(schema.appSettings.key, 'dob'), eq(schema.appSettings.userId, userId)));
     const dobStr = dobRow?.value ?? '1998-09-09';
     const today = todayLocal();
     const currentYear = Number(today.split('-')[0]);
@@ -263,7 +277,7 @@ export const fireService = {
 
     for (const sim of existing) {
       if (SYNCED.has(sim.name) && portfolioValue > 0) {
-        await this.update(sim.id, {
+        await this.update(userId, sim.id, {
           currentSavings: portfolioValue,
           currentAge: age,
           startYear: currentYear,
@@ -274,18 +288,18 @@ export const fireService = {
     return { synced, liveValue: Math.round(portfolioValue) };
   },
 
-  async _getCurrentPortfolioValue(): Promise<number> {
+  async _getCurrentPortfolioValue(userId: string): Promise<number> {
     // Try live snapshot first, fall back to latest portfolio_snapshot
     const snapshots = await db
       .select()
       .from(schema.portfolioSnapshots)
+      .where(eq(schema.portfolioSnapshots.userId, userId))
       .orderBy(desc(schema.portfolioSnapshots.snapshotDate))
-      .limit(1)
-      .all();
+      .limit(1);
     return snapshots[0]?.totalValue ?? 0;
   },
 
-  async _getAvgMonthlySaving(): Promise<number> {
+  async _getAvgMonthlySaving(userId: string): Promise<number> {
     // Average monthly buy-side investment over all transactions
     const rows = await db
       .select({
@@ -293,10 +307,9 @@ export const fireService = {
         total: sql<number>`sum(${schema.transactions.quantity} * ${schema.transactions.price})`,
       })
       .from(schema.transactions)
-      .where(eq(schema.transactions.type, 'buy'))
-      .groupBy(sql`substr(${schema.transactions.transactionDate}, 1, 7)`)
-      .all();
-
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(and(eq(schema.transactions.type, 'buy'), eq(schema.assets.userId, userId)))
+      .groupBy(sql`substr(${schema.transactions.transactionDate}, 1, 7)`);
     if (rows.length === 0) return 117500; // fallback
     const sum = rows.reduce((s, r) => s + (r.total ?? 0), 0);
     return Math.round(sum / rows.length);
@@ -304,9 +317,12 @@ export const fireService = {
 
   // ── Portfolio history from transactions ────────────────────────
 
-  async _getPortfolioHistory(): Promise<{ year: number; value: number }[]> {
+  async _getPortfolioHistory(userId: string): Promise<{ year: number; value: number }[]> {
     // 1. Actual snapshots (most accurate)
-    const snapshots = await db.select().from(schema.portfolioSnapshots).all();
+    const snapshots = await db
+      .select()
+      .from(schema.portfolioSnapshots)
+      .where(eq(schema.portfolioSnapshots.userId, userId));
     const snapshotYearMap = new Map<number, { value: number; date: string }>();
     for (const s of snapshots) {
       const year = parseInt(s.snapshotDate.slice(0, 4), 10);
@@ -323,12 +339,12 @@ export const fireService = {
         total: sql<number>`sum(${schema.transactions.quantity} * ${schema.transactions.price})`,
       })
       .from(schema.transactions)
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId))
       .groupBy(
         sql`substr(${schema.transactions.transactionDate}, 1, 4)`,
         schema.transactions.type,
-      )
-      .all();
-
+      );
     // Build cumulative invested by year
     const yearlyNet = new Map<number, number>();
     for (const row of txRows) {
@@ -354,7 +370,7 @@ export const fireService = {
     return result;
   },
 
-  async getMonthlyTargets(fy?: number): Promise<{
+  async getMonthlyTargets(userId: string, fy?: number): Promise<{
     fy: number;
     fyLabel: string;
     scenarios: { id: string; name: string; monthlySaving: number }[];
@@ -384,7 +400,7 @@ export const fireService = {
     }
 
     // Run simulations
-    const all = await this.getAll();
+    const all = await this.getAll(userId);
     const simResults = all.map((sim) => ({
       id: sim.id,
       name: sim.name,
@@ -412,7 +428,10 @@ export const fireService = {
     }
 
     // Actual portfolio values by month from snapshots
-    const snapshots = await db.select().from(schema.portfolioSnapshots).all();
+    const snapshots = await db
+      .select()
+      .from(schema.portfolioSnapshots)
+      .where(eq(schema.portfolioSnapshots.userId, userId));
     const monthSnap = new Map<string, { value: number; date: string }>();
     for (const s of snapshots) {
       const key = s.snapshotDate.slice(0, 7);
@@ -430,9 +449,8 @@ export const fireService = {
         total: sql<number>`sum(${schema.cashFlowSpends.amount})`,
       })
       .from(schema.cashFlowSpends)
-      .groupBy(schema.cashFlowSpends.entryMonth, schema.cashFlowSpends.type)
-      .all();
-
+      .where(eq(schema.cashFlowSpends.userId, userId))
+      .groupBy(schema.cashFlowSpends.entryMonth, schema.cashFlowSpends.type);
     const incomeMap = new Map<string, number>();
     const expenseMap = new Map<string, number>();
     for (const row of spendRows) {
@@ -469,13 +487,13 @@ export const fireService = {
     };
   },
 
-  async getAllProjections(): Promise<{
+  async getAllProjections(userId: string): Promise<{
     simulations: (FireSimulationResult & { id: string; name: string })[];
     actualPortfolio: { year: number; value: number }[];
     liveValue: number;
     liveProgress: { id: string; name: string; projected: number; actual: number; deficit: number }[];
   }> {
-    const all = await this.getAll();
+    const all = await this.getAll(userId);
     const simulations = all.map((sim) => ({
       id: sim.id,
       name: sim.name,
@@ -484,10 +502,10 @@ export const fireService = {
     }));
 
     // Get enriched portfolio history (snapshots + transaction-derived)
-    const actualPortfolio = await this._getPortfolioHistory();
+    const actualPortfolio = await this._getPortfolioHistory(userId);
 
     // Live portfolio value for current year progress
-    const liveValue = await this._getCurrentPortfolioValue();
+    const liveValue = await this._getCurrentPortfolioValue(userId);
     const currentYear = new Date().getFullYear();
 
     // Compare actual portfolio against the projected corpus at the START of the current year

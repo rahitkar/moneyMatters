@@ -71,8 +71,8 @@ const settingsSchema = z.object({
 export async function cashFlowRoutes(fastify: FastifyInstance) {
   // ── Settings ──────────────────────────────────────────────────
 
-  fastify.get('/settings', async () => {
-    return cashFlowService.getSettings();
+  fastify.get('/settings', async (request) => {
+    return cashFlowService.getSettings(request.userId);
   });
 
   fastify.put<{ Body: z.infer<typeof settingsSchema> }>(
@@ -80,15 +80,15 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = settingsSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const settings = await cashFlowService.updateSettings(v.data);
+      const settings = await cashFlowService.updateSettings(request.userId, v.data);
       return settings;
     },
   );
 
   // ── Categories ────────────────────────────────────────────────
 
-  fastify.get('/categories', async () => {
-    const categories = await cashFlowService.getCategories();
+  fastify.get('/categories', async (request) => {
+    const categories = await cashFlowService.getCategories(request.userId);
     return { categories };
   });
 
@@ -97,7 +97,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = createCategorySchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const category = await cashFlowService.createCategory(v.data);
+      const category = await cashFlowService.createCategory(request.userId, v.data);
       return { category };
     },
   );
@@ -107,7 +107,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = updateCategorySchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const category = await cashFlowService.updateCategory(request.params.id, v.data);
+      const category = await cashFlowService.updateCategory(request.userId, request.params.id, v.data);
       if (!category) return reply.status(404).send({ error: 'Category not found' });
       return { category };
     },
@@ -116,7 +116,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string } }>(
     '/categories/:id',
     async (request, reply) => {
-      const ok = await cashFlowService.deleteCategory(request.params.id);
+      const ok = await cashFlowService.deleteCategory(request.userId, request.params.id);
       if (!ok) return reply.status(404).send({ error: 'Category not found' });
       return { success: true };
     },
@@ -129,7 +129,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const month = monthSchema.safeParse(request.query.month);
       if (!month.success) return reply.status(400).send({ error: 'Invalid month format (YYYY-MM)' });
-      const summary = await cashFlowService.getMonthSummary(month.data);
+      const summary = await cashFlowService.getMonthSummary(request.userId, month.data);
       return { summary };
     },
   );
@@ -141,7 +141,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const year = request.query.year;
       if (!/^\d{4}$/.test(year)) return reply.status(400).send({ error: 'Invalid year' });
-      const summary = await cashFlowService.getYearlySummary(year);
+      const summary = await cashFlowService.getYearlySummary(request.userId, year);
       return { summary };
     },
   );
@@ -153,7 +153,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const month = monthSchema.safeParse(request.body.month);
       if (!month.success) return reply.status(400).send({ error: 'Invalid month format' });
-      const result = await cashFlowService.initMonth(month.data);
+      const result = await cashFlowService.initMonth(request.userId, month.data);
       return result;
     },
   );
@@ -165,7 +165,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = upsertEntrySchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const entry = await cashFlowService.upsertEntry(v.data);
+      const entry = await cashFlowService.upsertEntry(request.userId, v.data);
       return { entry };
     },
   );
@@ -175,7 +175,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = updateEntrySchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const entry = await cashFlowService.updateEntry(request.params.id, v.data);
+      const entry = await cashFlowService.updateEntry(request.userId, request.params.id, v.data);
       if (!entry) return reply.status(404).send({ error: 'Entry not found' });
       return { entry };
     },
@@ -184,7 +184,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string } }>(
     '/entries/:id',
     async (request, reply) => {
-      const ok = await cashFlowService.deleteEntry(request.params.id);
+      const ok = await cashFlowService.deleteEntry(request.userId, request.params.id);
       if (!ok) return reply.status(404).send({ error: 'Entry not found' });
       return { success: true };
     },
@@ -197,7 +197,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const month = monthSchema.safeParse(request.query.month);
       if (!month.success) return reply.status(400).send({ error: 'Invalid month' });
-      const income = await cashFlowService.getIncome(month.data);
+      const income = await cashFlowService.getIncome(request.userId, month.data);
       return { income };
     },
   );
@@ -209,15 +209,15 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
       if (!month.success) return reply.status(400).send({ error: 'Invalid month' });
       const v = monthConfigSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const income = await cashFlowService.upsertMonthConfig(month.data, v.data);
+      const income = await cashFlowService.upsertMonthConfig(request.userId, month.data, v.data);
       return { income };
     },
   );
 
   // ── Payment Methods ──────────────────────────────────────────
 
-  fastify.get('/payment-methods', async () => {
-    const methods = await cashFlowService.getPaymentMethods();
+  fastify.get('/payment-methods', async (request) => {
+    const methods = await cashFlowService.getPaymentMethods(request.userId);
     return { methods };
   });
 
@@ -226,7 +226,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = createPaymentMethodSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const method = await cashFlowService.createPaymentMethod(v.data.name, v.data.type);
+      const method = await cashFlowService.createPaymentMethod(request.userId, v.data.name, v.data.type);
       return { method };
     },
   );
@@ -234,7 +234,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string } }>(
     '/payment-methods/:id',
     async (request, reply) => {
-      const ok = await cashFlowService.deletePaymentMethod(request.params.id);
+      const ok = await cashFlowService.deletePaymentMethod(request.userId, request.params.id);
       if (!ok) return reply.status(404).send({ error: 'Payment method not found' });
       return { success: true };
     },
@@ -247,7 +247,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const month = monthSchema.safeParse(request.query.month);
       if (!month.success) return reply.status(400).send({ error: 'Invalid month format' });
-      const spends = await cashFlowService.getSpendsForMonth(month.data);
+      const spends = await cashFlowService.getSpendsForMonth(request.userId, month.data);
       return { spends };
     },
   );
@@ -257,7 +257,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = addSpendSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const spend = await cashFlowService.addSpend(v.data);
+      const spend = await cashFlowService.addSpend(request.userId, v.data);
       return { spend };
     },
   );
@@ -267,7 +267,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const v = updateSpendSchema.safeParse(request.body);
       if (!v.success) return reply.status(400).send({ error: v.error.errors });
-      const spend = await cashFlowService.updateSpend(request.params.id, v.data);
+      const spend = await cashFlowService.updateSpend(request.userId, request.params.id, v.data);
       if (!spend) return reply.status(404).send({ error: 'Spend not found' });
       return { spend };
     },
@@ -276,7 +276,7 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string } }>(
     '/spends/:id',
     async (request, reply) => {
-      const ok = await cashFlowService.deleteSpend(request.params.id);
+      const ok = await cashFlowService.deleteSpend(request.userId, request.params.id);
       if (!ok) return reply.status(404).send({ error: 'Spend not found' });
       return { success: true };
     },

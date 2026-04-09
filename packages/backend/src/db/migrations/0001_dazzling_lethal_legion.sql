@@ -1,0 +1,1 @@
+ALTER TABLE "asset_tags" ADD CONSTRAINT "asset_tags_asset_id_tag_id_pk" PRIMARY KEY("asset_id","tag_id");

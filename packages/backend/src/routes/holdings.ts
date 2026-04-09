@@ -20,20 +20,20 @@ const updateHoldingSchema = z.object({
 
 export async function holdingRoutes(fastify: FastifyInstance) {
   // Get all holdings
-  fastify.get('/', async () => {
-    const holdings = await holdingService.getAll();
+  fastify.get('/', async (request) => {
+    const holdings = await holdingService.getAll(request.userId);
     return { holdings };
   });
 
   // Get all holdings with asset details
-  fastify.get('/with-assets', async () => {
-    const holdings = await holdingService.getAllWithAssets();
+  fastify.get('/with-assets', async (request) => {
+    const holdings = await holdingService.getAllWithAssets(request.userId);
     return { holdings };
   });
 
   // Get holding by ID
   fastify.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const holding = await holdingService.getById(request.params.id);
+    const holding = await holdingService.getById(request.userId, request.params.id);
     if (!holding) {
       return reply.status(404).send({ error: 'Holding not found' });
     }
@@ -44,7 +44,7 @@ export async function holdingRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { assetId: string } }>(
     '/asset/:assetId',
     async (request) => {
-      const holdings = await holdingService.getByAssetId(request.params.assetId);
+      const holdings = await holdingService.getByAssetId(request.userId, request.params.assetId);
       return { holdings };
     }
   );
@@ -59,12 +59,12 @@ export async function holdingRoutes(fastify: FastifyInstance) {
       }
 
       // Verify asset exists
-      const asset = await assetService.getById(validation.data.assetId);
+      const asset = await assetService.getById(request.userId, validation.data.assetId);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
-      const holding = await holdingService.create(validation.data);
+      const holding = await holdingService.create(request.userId, validation.data);
       return reply.status(201).send({ holding });
     }
   );
@@ -78,7 +78,7 @@ export async function holdingRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const holding = await holdingService.update(request.params.id, validation.data);
+      const holding = await holdingService.update(request.userId, request.params.id, validation.data);
       if (!holding) {
         return reply.status(404).send({ error: 'Holding not found' });
       }
@@ -89,12 +89,12 @@ export async function holdingRoutes(fastify: FastifyInstance) {
 
   // Delete holding
   fastify.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const holding = await holdingService.getById(request.params.id);
+    const holding = await holdingService.getById(request.userId, request.params.id);
     if (!holding) {
       return reply.status(404).send({ error: 'Holding not found' });
     }
 
-    await holdingService.delete(request.params.id);
+    await holdingService.delete(request.userId, request.params.id);
     return { success: true };
   });
 }

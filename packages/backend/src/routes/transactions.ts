@@ -17,50 +17,49 @@ const createTransactionSchema = z.object({
 });
 
 export async function transactionRoutes(fastify: FastifyInstance) {
+  // Register static and multi-segment paths before `/:id` so names like `positions` are not captured as ids.
+
   // Get all transactions
-  fastify.get('/', async () => {
-    const transactions = await transactionService.getAll();
+  fastify.get('/', async (request) => {
+    const transactions = await transactionService.getAll(request.userId);
     return { transactions };
   });
 
   // Get all transactions with asset details
-  fastify.get('/with-assets', async () => {
-    const transactions = await transactionService.getAllWithAssets();
+  fastify.get('/with-assets', async (request) => {
+    const transactions = await transactionService.getAllWithAssets(request.userId);
     return { transactions };
-  });
-
-  // Get transaction by ID
-  fastify.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const transaction = await transactionService.getById(request.params.id);
-    if (!transaction) {
-      return reply.status(404).send({ error: 'Transaction not found' });
-    }
-    return { transaction };
   });
 
   // Get transactions by asset
   fastify.get<{ Params: { assetId: string } }>(
     '/asset/:assetId',
     async (request) => {
-      const transactions = await transactionService.getByAssetId(request.params.assetId);
+      const transactions = await transactionService.getByAssetId(
+        request.userId,
+        request.params.assetId
+      );
       return { transactions };
     }
   );
 
   // Get all positions (computed from transactions)
-  fastify.get('/positions', async () => {
-    const positions = await transactionService.getAllPositions();
+  fastify.get('/positions', async (request) => {
+    const positions = await transactionService.getAllPositions(request.userId);
     return { positions };
   });
 
   // Day change for each asset: previous close vs current price
-  fastify.get('/positions/day-changes', async () => getDayChanges());
+  fastify.get('/positions/day-changes', async (request) => getDayChanges(request.userId));
 
   // Get position for a specific asset
   fastify.get<{ Params: { assetId: string } }>(
     '/positions/:assetId',
     async (request, reply) => {
-      const position = await transactionService.getPositionForAsset(request.params.assetId);
+      const position = await transactionService.getPositionForAsset(
+        request.userId,
+        request.params.assetId
+      );
       if (!position) {
         return reply.status(404).send({ error: 'Position not found' });
       }
@@ -72,14 +71,14 @@ export async function transactionRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { assetId: string } }>(
     '/lots/:assetId',
     async (request) => {
-      const lots = await transactionService.getBuyLots(request.params.assetId);
+      const lots = await transactionService.getBuyLots(request.userId, request.params.assetId);
       return { lots };
     }
   );
 
   // Get realized gains summary
-  fastify.get('/realized-gains', async () => {
-    const total = await transactionService.getTotalRealizedGains();
+  fastify.get('/realized-gains', async (request) => {
+    const total = await transactionService.getTotalRealizedGains(request.userId);
     return { totalRealizedGains: total };
   });
 
@@ -87,7 +86,10 @@ export async function transactionRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { assetId: string } }>(
     '/realized-gains/:assetId',
     async (request) => {
-      const gains = await transactionService.getRealizedGainsByAsset(request.params.assetId);
+      const gains = await transactionService.getRealizedGainsByAsset(
+        request.userId,
+        request.params.assetId
+      );
       return { realizedGains: gains };
     }
   );
@@ -101,17 +103,22 @@ export async function transactionRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      // Verify asset exists
-      const asset = await assetService.getById(validation.data.assetId);
+      const asset = await assetService.getById(request.userId, validation.data.assetId);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
       try {
-        const transaction = await transactionService.create(validation.data);
+        const transaction = await transactionService.create(request.userId, {
+          userId: request.userId,
+          ...validation.data,
+        });
         return reply.status(201).send({ transaction });
       } catch (error) {
         if (error instanceof Error && error.message.includes('Insufficient quantity')) {
+          return reply.status(400).send({ error: error.message });
+        }
+        if (error instanceof Error && error.message.includes('not found')) {
           return reply.status(400).send({ error: error.message });
         }
         throw error;
@@ -119,16 +126,23 @@ export async function transactionRoutes(fastify: FastifyInstance) {
     }
   );
 
+  // Get transaction by ID
+  fastify.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
+    const transaction = await transactionService.getById(request.userId, request.params.id);
+    if (!transaction) {
+      return reply.status(404).send({ error: 'Transaction not found' });
+    }
+    return { transaction };
+  });
+
   // Delete transaction
   fastify.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const transaction = await transactionService.getById(request.params.id);
+    const transaction = await transactionService.getById(request.userId, request.params.id);
     if (!transaction) {
       return reply.status(404).send({ error: 'Transaction not found' });
     }
 
-    // Note: Deleting a sell transaction will also delete its realized gains
-    // Deleting a buy transaction could affect position calculations
-    await transactionService.delete(request.params.id);
+    await transactionService.delete(request.userId, request.params.id);
     return { success: true };
   });
 }

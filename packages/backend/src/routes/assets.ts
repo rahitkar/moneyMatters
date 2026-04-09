@@ -45,14 +45,14 @@ const bulkTagsSchema = z.object({
 
 export async function assetRoutes(fastify: FastifyInstance) {
   // Get all assets (includes tags)
-  fastify.get('/', async () => {
-    const assets = await assetService.getAllWithTags();
+  fastify.get('/', async (request) => {
+    const assets = await assetService.getAllWithTags(request.userId);
     return { assets };
   });
 
   // Get asset by ID
   fastify.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const asset = await assetService.getWithTags(request.params.id);
+    const asset = await assetService.getWithTags(request.userId, request.params.id);
     if (!asset) {
       return reply.status(404).send({ error: 'Asset not found' });
     }
@@ -67,7 +67,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
       if (!ASSET_CLASSES.includes(assetClass)) {
         return reply.status(400).send({ error: 'Invalid asset class' });
       }
-      const assets = await assetService.getByAssetClass(assetClass);
+      const assets = await assetService.getByAssetClass(request.userId, assetClass);
       return { assets };
     }
   );
@@ -83,7 +83,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
 
       // Allow duplicate symbols when a distinct name is provided (e.g. same stock
       // held in different accounts/lots). Only block true duplicates (same symbol + name).
-      const existing = await assetService.getBySymbol(validation.data.symbol);
+      const existing = await assetService.getBySymbol(request.userId, validation.data.symbol);
       if (existing && existing.name === validation.data.name) {
         return reply.status(409).send({ 
           error: 'Asset with this symbol and name already exists',
@@ -91,7 +91,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const asset = await assetService.create(validation.data);
+      const asset = await assetService.create({ ...validation.data, userId: request.userId });
       return reply.status(201).send({ asset });
     }
   );
@@ -105,7 +105,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const asset = await assetService.update(request.params.id, validation.data);
+      const asset = await assetService.update(request.userId, request.params.id, validation.data);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
@@ -116,12 +116,12 @@ export async function assetRoutes(fastify: FastifyInstance) {
 
   // Delete asset
   fastify.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const asset = await assetService.getById(request.params.id);
+    const asset = await assetService.getById(request.userId, request.params.id);
     if (!asset) {
       return reply.status(404).send({ error: 'Asset not found' });
     }
 
-    await assetService.delete(request.params.id);
+    await assetService.delete(request.userId, request.params.id);
     return { success: true };
   });
 
@@ -134,13 +134,19 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
-      await assetService.updatePrice(request.params.id, validation.data.price);
-      const updatedAsset = await assetService.getById(request.params.id);
+      await assetService.updatePrice(
+        request.params.id,
+        validation.data.price,
+        undefined,
+        undefined,
+        request.userId
+      );
+      const updatedAsset = await assetService.getById(request.userId, request.params.id);
 
       return { asset: updatedAsset };
     }
@@ -159,12 +165,15 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
-      const position = await transactionService.getPositionForAsset(request.params.id);
+      const position = await transactionService.getPositionForAsset(
+        request.userId,
+        request.params.id
+      );
       const quantity = position?.quantity ?? 0;
 
       if (quantity <= 0) {
@@ -174,8 +183,8 @@ export async function assetRoutes(fastify: FastifyInstance) {
       }
 
       const newPrice = validation.data.balance / quantity;
-      await assetService.updatePrice(request.params.id, newPrice);
-      const updatedAsset = await assetService.getById(request.params.id);
+      await assetService.updatePrice(request.params.id, newPrice, undefined, undefined, request.userId);
+      const updatedAsset = await assetService.getById(request.userId, request.params.id);
 
       return {
         asset: updatedAsset,
@@ -193,13 +202,13 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
       await assetService.setTags(request.params.id, validation.data.tagIds);
-      const updatedAsset = await assetService.getWithTags(request.params.id);
+      const updatedAsset = await assetService.getWithTags(request.userId, request.params.id);
 
       return { asset: updatedAsset };
     }
@@ -209,13 +218,13 @@ export async function assetRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { id: string; tagId: string } }>(
     '/:id/tags/:tagId',
     async (request, reply) => {
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
       await assetService.addTag(request.params.id, request.params.tagId);
-      const updatedAsset = await assetService.getWithTags(request.params.id);
+      const updatedAsset = await assetService.getWithTags(request.userId, request.params.id);
 
       return { asset: updatedAsset };
     }
@@ -225,13 +234,13 @@ export async function assetRoutes(fastify: FastifyInstance) {
   fastify.delete<{ Params: { id: string; tagId: string } }>(
     '/:id/tags/:tagId',
     async (request, reply) => {
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
       await assetService.removeTag(request.params.id, request.params.tagId);
-      const updatedAsset = await assetService.getWithTags(request.params.id);
+      const updatedAsset = await assetService.getWithTags(request.userId, request.params.id);
 
       return { asset: updatedAsset };
     }
@@ -271,7 +280,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
     const errors: { symbol: string; error: string }[] = [];
 
     for (const { symbol, price } of prices) {
-      const asset = await assetService.getBySymbol(symbol);
+      const asset = await assetService.getBySymbol(request.userId, symbol);
       if (!asset) {
         errors.push({ symbol, error: 'Asset not found' });
         continue;
@@ -280,7 +289,7 @@ export async function assetRoutes(fastify: FastifyInstance) {
         errors.push({ symbol, error: 'Invalid price' });
         continue;
       }
-      await assetService.updatePrice(asset.id, price);
+      await assetService.updatePrice(asset.id, price, undefined, undefined, request.userId);
       updated++;
     }
 
@@ -300,13 +309,14 @@ export async function assetRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: validation.error.errors });
       }
 
-      const asset = await assetService.getById(request.params.id);
+      const asset = await assetService.getById(request.userId, request.params.id);
       if (!asset) {
         return reply.status(404).send({ error: 'Asset not found' });
       }
 
       try {
         const result = await transactionService.applySplit(
+          request.userId,
           request.params.id,
           validation.data.ratio
         );
@@ -318,8 +328,8 @@ export async function assetRoutes(fastify: FastifyInstance) {
   );
 
   // Migrate Indian stock symbols to include .NS suffix (direct database update, no API calls)
-  fastify.post('/migrate-indian-stocks', async () => {
-    const assets = await assetService.getAll();
+  fastify.post('/migrate-indian-stocks', async (request) => {
+    const assets = await assetService.getAll(request.userId);
     let migrated = 0;
     let skipped = 0;
     const updated: string[] = [];
@@ -339,8 +349,8 @@ export async function assetRoutes(fastify: FastifyInstance) {
 
       // Add .NS suffix directly without API call
       const newSymbol = `${asset.symbol}.NS`;
-      await assetService.updateSymbol(asset.id, newSymbol);
-      await assetService.update(asset.id, { currency: 'INR' });
+      await assetService.updateSymbol(request.userId, asset.id, newSymbol);
+      await assetService.update(request.userId, asset.id, { currency: 'INR' });
       updated.push(`${asset.symbol} → ${newSymbol}`);
       migrated++;
     }

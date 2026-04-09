@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: money-matters-api
+    runtime: node
+    plan: free
+    buildCommand: cd packages/backend && npm install && npm run build
+    startCommand: cd packages/backend && node dist/index.js
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: NODE_ENV
+        value: production

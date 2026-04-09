@@ -5,26 +5,26 @@ import { ASSET_CLASSES } from '../db/schema.js';
 
 export async function portfolioRoutes(fastify: FastifyInstance) {
   // Get portfolio summary
-  fastify.get('/summary', async () => {
-    const summary = await portfolioService.getSummary();
+  fastify.get('/summary', async (request) => {
+    const summary = await portfolioService.getSummary(request.userId);
     return { summary };
   });
 
   // Get asset allocation
-  fastify.get('/allocation', async () => {
-    const allocation = await portfolioService.getAllocation();
+  fastify.get('/allocation', async (request) => {
+    const allocation = await portfolioService.getAllocation(request.userId);
     return { allocation };
   });
 
   // Multi-dimensional allocation (6 dimensions)
-  fastify.get('/allocation/multi', async () => {
-    const allocation = await portfolioService.getMultiDimensionalAllocation();
+  fastify.get('/allocation/multi', async (request) => {
+    const allocation = await portfolioService.getMultiDimensionalAllocation(request.userId);
     return { allocation };
   });
 
   // Get all holdings with calculated values
-  fastify.get('/holdings', async () => {
-    const holdings = await portfolioService.getHoldingsWithValues();
+  fastify.get('/holdings', async (request) => {
+    const holdings = await portfolioService.getHoldingsWithValues(request.userId);
     return { holdings };
   });
 
@@ -32,7 +32,7 @@ export async function portfolioRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { tagId: string } }>(
     '/holdings/tag/:tagId',
     async (request) => {
-      const holdings = await portfolioService.getHoldingsByTag(request.params.tagId);
+      const holdings = await portfolioService.getHoldingsByTag(request.userId, request.params.tagId);
       return { holdings };
     }
   );
@@ -46,7 +46,7 @@ export async function portfolioRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: 'Invalid asset class' });
       }
 
-      const holdings = await portfolioService.getHoldingsByAssetClass(assetClass);
+      const holdings = await portfolioService.getHoldingsByAssetClass(request.userId, assetClass);
       return { holdings };
     }
   );
@@ -56,7 +56,7 @@ export async function portfolioRoutes(fastify: FastifyInstance) {
     '/top-performers',
     async (request) => {
       const limit = request.query.limit ? parseInt(request.query.limit) : 5;
-      const holdings = await portfolioService.getTopPerformers(limit);
+      const holdings = await portfolioService.getTopPerformers(request.userId, limit);
       return { holdings };
     }
   );
@@ -66,7 +66,7 @@ export async function portfolioRoutes(fastify: FastifyInstance) {
     '/worst-performers',
     async (request) => {
       const limit = request.query.limit ? parseInt(request.query.limit) : 5;
-      const holdings = await portfolioService.getWorstPerformers(limit);
+      const holdings = await portfolioService.getWorstPerformers(request.userId, limit);
       return { holdings };
     }
   );

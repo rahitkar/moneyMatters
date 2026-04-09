@@ -63,7 +63,7 @@ export async function importRoutes(fastify: FastifyInstance) {
 
         try {
           // Check if asset exists
-          let asset = await assetService.getBySymbol(row.symbol);
+          let asset = await assetService.getBySymbol(request.userId, row.symbol);
 
           if (!asset) {
             // Try to get asset info from market data
@@ -81,6 +81,7 @@ export async function importRoutes(fastify: FastifyInstance) {
 
             // Create the asset
             asset = await assetService.create({
+              userId: request.userId,
               symbol: row.symbol.toUpperCase(),
               name,
               assetClass,
@@ -92,7 +93,7 @@ export async function importRoutes(fastify: FastifyInstance) {
           }
 
           // Create the holding
-          await holdingService.create({
+          await holdingService.create(request.userId, {
             assetId: asset.id,
             quantity: row.quantity,
             purchasePrice: row.purchasePrice,
@@ -227,7 +228,7 @@ export async function importRoutes(fastify: FastifyInstance) {
     }
 
     // Now import the valid rows
-    const importResult = await importHoldings(rows, skipExisting);
+    const importResult = await importHoldings(rows, skipExisting, request.userId);
 
     return {
       success: true,
@@ -336,8 +337,8 @@ export async function importRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const fundSourceId = await resolveFundSource(kind);
-    const importResult = await importTradebook(rows, kind, fundSourceId);
+    const fundSourceId = await resolveFundSource(kind, request.userId);
+    const importResult = await importTradebook(rows, kind, fundSourceId, request.userId);
 
     return {
       success: true,
@@ -388,7 +389,8 @@ function formatDate(dateStr: string | undefined, format: string = 'YYYY-MM-DD'):
 // Helper to import holdings
 async function importHoldings(
   rows: z.infer<typeof importRowSchema>[],
-  skipExisting: boolean
+  skipExisting: boolean,
+  userId: string
 ) {
   const results = {
     imported: 0,
@@ -400,7 +402,7 @@ async function importHoldings(
     const row = rows[i];
 
     try {
-      let asset = await assetService.getBySymbol(row.symbol);
+      let asset = await assetService.getBySymbol(userId, row.symbol);
 
       if (!asset) {
         const searchResults = await marketDataService.search(row.symbol);
@@ -413,6 +415,7 @@ async function importHoldings(
           'stocks';
 
         asset = await assetService.create({
+          userId,
           symbol: row.symbol.toUpperCase(),
           name: row.name || matchingResult?.name || row.symbol,
           assetClass,
@@ -423,7 +426,7 @@ async function importHoldings(
         continue;
       }
 
-      await holdingService.create({
+      await holdingService.create(userId, {
         assetId: asset.id,
         quantity: row.quantity,
         purchasePrice: row.purchasePrice,
@@ -483,32 +486,41 @@ function detectAssetClass(symbol: string): AssetClass {
 }
 
 // Import tradebook transactions (caller must pass rows that all match `kind`)
-async function resolveFundSource(kind: 'stocks' | 'mutual_funds' | 'holdings', hint?: string): Promise<string | null> {
+async function resolveFundSource(
+  kind: 'stocks' | 'mutual_funds' | 'holdings',
+  userId: string,
+  hint?: string
+): Promise<string | null> {
   const { db } = await import('../db/index.js');
   const { assets } = await import('../db/schema.js');
-  const { eq } = await import('drizzle-orm');
+  const { eq, and } = await import('drizzle-orm');
 
   if (hint) {
-    const exact = await db.select({ id: assets.id }).from(assets).where(eq(assets.id, hint)).limit(1).then((r) => r[0]);
+    const exact = await db
+      .select({ id: assets.id })
+      .from(assets)
+      .where(and(eq(assets.id, hint), eq(assets.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]);
     if (exact) return exact.id;
   }
 
   // Zerodha stock imports → look for a "Zerodha" cash asset
   if (kind === 'stocks') {
-    const match = await db.select({ id: assets.id, name: assets.name })
+    const match = await db
+      .select({ id: assets.id, name: assets.name })
       .from(assets)
-      .where(eq(assets.assetClass, 'cash'))
-      .all();
+      .where(and(eq(assets.assetClass, 'cash'), eq(assets.userId, userId)));
     const z = match.find((a) => /zerodha/i.test(a.name));
     return z?.id ?? null;
   }
 
   // MF imports → look for a bank/savings cash asset (not Zerodha/IndMoney)
   if (kind === 'mutual_funds') {
-    const match = await db.select({ id: assets.id, name: assets.name })
+    const match = await db
+      .select({ id: assets.id, name: assets.name })
       .from(assets)
-      .where(eq(assets.assetClass, 'cash'))
-      .all();
+      .where(and(eq(assets.assetClass, 'cash'), eq(assets.userId, userId)));
     const bank = match.find((a) => /bank|kotak|savings/i.test(a.name));
     return bank?.id ?? null;
   }
@@ -519,7 +531,8 @@ async function resolveFundSource(kind: 'stocks' | 'mutual_funds' | 'holdings', h
 async function importTradebook(
   rows: TradebookRow[],
   kind: 'stocks' | 'mutual_funds',
-  fundSourceId?: string | null,
+  fundSourceId: string | null | undefined,
+  userId: string
 ): Promise<{
   imported: number;
   skipped: number;
@@ -574,11 +587,11 @@ async function importTradebook(
 
     if (isMF) {
       if (isin) {
-        asset = await assetService.getByIsin(isin);
+        asset = await assetService.getByIsin(userId, isin);
       }
       if (!asset) {
         for (const cand of mutualFundSymbolCandidates(isin, transactions)) {
-          asset = await assetService.getBySymbol(cand);
+          asset = await assetService.getBySymbol(userId, cand);
           if (asset) break;
         }
       }
@@ -588,12 +601,12 @@ async function importTradebook(
           asset.assetClass === 'etf' ||
           asset.assetClass === 'mutual_fund')
       ) {
-        await assetService.update(asset.id, {
+        await assetService.update(userId, asset.id, {
           assetClass: mfClass!,
           name: displayName.length >= asset.name.length ? displayName : asset.name,
           isin: isin ?? asset.isin ?? null,
         });
-        asset = await assetService.getById(asset.id);
+        asset = await assetService.getById(userId, asset.id);
       }
     }
 
@@ -601,15 +614,16 @@ async function importTradebook(
     const yahooSymbol = `${equitySymbol}.NS`;
 
     if (!asset && !isMF) {
-      asset = await assetService.getBySymbol(yahooSymbol);
+      asset = await assetService.getBySymbol(userId, yahooSymbol);
       if (!asset) {
-        asset = await assetService.getBySymbol(equitySymbol);
+        asset = await assetService.getBySymbol(userId, equitySymbol);
       }
     }
 
     if (!asset && isMF) {
       const mfSymbol = isin ?? normalizeFundLabel(displayName);
       asset = await assetService.create({
+        userId,
         symbol: mfSymbol,
         isin: isin ?? null,
         name: displayName,
@@ -634,6 +648,7 @@ async function importTradebook(
       }
 
       asset = await assetService.create({
+        userId,
         symbol: yahooSymbol,
         name: assetName,
         assetClass,
@@ -672,7 +687,8 @@ async function importTradebook(
       const rowIndex = rows.indexOf(tx) + 2;
 
       try {
-        await transactionService.create({
+        await transactionService.create(userId, {
+          userId,
           assetId: asset.id!,
           type: tx.tradeType as TransactionType,
           quantity: tx.quantity,

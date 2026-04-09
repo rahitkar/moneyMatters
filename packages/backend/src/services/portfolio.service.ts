@@ -1,5 +1,5 @@
-import { eq, sql } from 'drizzle-orm';
-import { db, schema, sqlite } from '../db/index.js';
+import { eq, and, isNotNull } from 'drizzle-orm';
+import { db, schema } from '../db/index.js';
 import { holdingService } from './holding.service.js';
 import { transactionService } from './transaction.service.js';
 import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
@@ -25,18 +25,19 @@ export interface DayChangeResult {
   totalDayChangePercent: number;
 }
 
-export async function getDayChanges(): Promise<DayChangeResult> {
-  // Build a map of asset_id → previous_close from the assets table (set by Yahoo on refresh)
-  const assetPrevRows = sqlite.prepare(
-    `SELECT id, previous_close FROM assets WHERE previous_close IS NOT NULL`
-  ).all() as { id: string; previous_close: number }[];
+export async function getDayChanges(userId: string): Promise<DayChangeResult> {
+  const assetPrevRows = await db
+    .select({ id: schema.assets.id, previousClose: schema.assets.previousClose })
+    .from(schema.assets)
+    .where(and(isNotNull(schema.assets.previousClose), eq(schema.assets.userId, userId)));
+
   const prevCloseMap = new Map<string, number>();
   for (const row of assetPrevRows) {
-    prevCloseMap.set(row.id, row.previous_close);
+    if (row.previousClose != null) prevCloseMap.set(row.id, row.previousClose);
   }
 
   const usdToInr = await getUsdToInr();
-  const positions = await transactionService.getAllPositions();
+  const positions = await transactionService.getAllPositions(userId);
   const dayChanges: DayChangeResult['dayChanges'] = {};
   let totalDayChange = 0;
   let totalPreviousValue = 0;
@@ -263,12 +264,12 @@ export interface HoldingWithValue {
 }
 
 export const portfolioService = {
-  async getSummary(): Promise<PortfolioSummary> {
+  async getSummary(userId: string): Promise<PortfolioSummary> {
     const usdToInr = await getUsdToInr();
 
     // Try transaction-based positions first
-    const positions = await transactionService.getAllPositions();
-    
+    const positions = await transactionService.getAllPositions(userId);
+
     if (positions.length > 0) {
       let totalValue = 0;
       let totalCost = 0;
@@ -301,7 +302,7 @@ export const portfolioService = {
     }
 
     // Fallback to legacy holdings
-    const holdingsWithAssets = await holdingService.getAllWithAssets();
+    const holdingsWithAssets = await holdingService.getAllWithAssets(userId);
 
     let totalValue = 0;
     let totalCost = 0;
@@ -334,12 +335,12 @@ export const portfolioService = {
     };
   },
 
-  async getAllocation(): Promise<AssetAllocation[]> {
+  async getAllocation(userId: string): Promise<AssetAllocation[]> {
     const usdToInr = await getUsdToInr();
 
     // Try transaction-based positions first
-    const positions = await transactionService.getAllPositions();
-    
+    const positions = await transactionService.getAllPositions(userId);
+
     if (positions.length > 0) {
       const byClass = new Map<AssetClass, { value: number; count: number }>();
       let totalValue = 0;
@@ -373,7 +374,7 @@ export const portfolioService = {
     }
 
     // Fallback to legacy holdings
-    const holdingsWithAssets = await holdingService.getAllWithAssets();
+    const holdingsWithAssets = await holdingService.getAllWithAssets(userId);
 
     const byClass = new Map<AssetClass, { value: number; count: number }>();
 
@@ -409,9 +410,9 @@ export const portfolioService = {
     return allocations;
   },
 
-  async getHoldingsWithValues(): Promise<HoldingWithValue[]> {
+  async getHoldingsWithValues(userId: string): Promise<HoldingWithValue[]> {
     // Try transaction-based positions first
-    const positions = await transactionService.getAllPositions();
+    const positions = await transactionService.getAllPositions(userId);
     
     if (positions.length > 0) {
       return positions.map((position) => ({
@@ -432,7 +433,7 @@ export const portfolioService = {
     }
 
     // Fallback to legacy holdings
-    const holdingsWithAssets = await holdingService.getAllWithAssets();
+    const holdingsWithAssets = await holdingService.getAllWithAssets(userId);
 
     return holdingsWithAssets.map(({ holding, asset }) => {
       const currentPrice = asset.currentPrice ?? holding.purchasePrice;
@@ -459,42 +460,42 @@ export const portfolioService = {
     });
   },
 
-  async getHoldingsByTag(tagId: string): Promise<HoldingWithValue[]> {
-    // Get assets with this tag
+  async getHoldingsByTag(userId: string, tagId: string): Promise<HoldingWithValue[]> {
     const assetTagResults = await db
       .select({ assetId: schema.assetTags.assetId })
       .from(schema.assetTags)
-      .where(eq(schema.assetTags.tagId, tagId));
+      .innerJoin(schema.tags, eq(schema.assetTags.tagId, schema.tags.id))
+      .where(and(eq(schema.assetTags.tagId, tagId), eq(schema.tags.userId, userId)));
 
     const taggedAssetIds = new Set(assetTagResults.map((r) => r.assetId));
 
-    const allHoldings = await this.getHoldingsWithValues();
+    const allHoldings = await this.getHoldingsWithValues(userId);
     return allHoldings.filter((h) => taggedAssetIds.has(h.assetId));
   },
 
-  async getHoldingsByAssetClass(assetClass: AssetClass): Promise<HoldingWithValue[]> {
-    const allHoldings = await this.getHoldingsWithValues();
+  async getHoldingsByAssetClass(userId: string, assetClass: AssetClass): Promise<HoldingWithValue[]> {
+    const allHoldings = await this.getHoldingsWithValues(userId);
     return allHoldings.filter((h) => h.assetClass === assetClass);
   },
 
-  async getTopPerformers(limit = 5): Promise<HoldingWithValue[]> {
-    const holdings = await this.getHoldingsWithValues();
+  async getTopPerformers(userId: string, limit = 5): Promise<HoldingWithValue[]> {
+    const holdings = await this.getHoldingsWithValues(userId);
     return holdings
       .filter((h) => h.costBasis > 0)
       .sort((a, b) => b.gainPercent - a.gainPercent)
       .slice(0, limit);
   },
 
-  async getWorstPerformers(limit = 5): Promise<HoldingWithValue[]> {
-    const holdings = await this.getHoldingsWithValues();
+  async getWorstPerformers(userId: string, limit = 5): Promise<HoldingWithValue[]> {
+    const holdings = await this.getHoldingsWithValues(userId);
     return holdings
       .filter((h) => h.costBasis > 0)
       .sort((a, b) => a.gainPercent - b.gainPercent)
       .slice(0, limit);
   },
 
-  async getMultiDimensionalAllocation(): Promise<MultiDimensionalAllocation> {
-    const positions = await transactionService.getAllPositions();
+  async getMultiDimensionalAllocation(userId: string): Promise<MultiDimensionalAllocation> {
+    const positions = await transactionService.getAllPositions(userId);
     const usdToInr = await getUsdToInr();
 
     const byAssetClass = new Map<string, { value: number; count: number }>();

@@ -7,19 +7,19 @@ import type { TimeInterval } from '../db/schema.js';
 
 const periodSchema = z.enum(['monthly', 'quarterly', 'yearly']);
 
-async function getPortfolioBlock() {
+async function getPortfolioBlock(userId: string) {
   const [summary, allocation, topPerformers, worstPerformers] = await Promise.all([
-    portfolioService.getSummary(),
-    portfolioService.getAllocation(),
-    portfolioService.getTopPerformers(5),
-    portfolioService.getWorstPerformers(5),
+    portfolioService.getSummary(userId),
+    portfolioService.getAllocation(userId),
+    portfolioService.getTopPerformers(userId, 5),
+    portfolioService.getWorstPerformers(userId, 5),
   ]);
   return { summary, allocation, topPerformers, worstPerformers };
 }
 
-async function getDayChangeBlock() {
+async function getDayChangeBlock(userId: string) {
   try {
-    const result = await getDayChanges();
+    const result = await getDayChanges(userId);
     return {
       change: result.totalDayChange,
       changePercent: result.totalDayChangePercent,
@@ -29,13 +29,13 @@ async function getDayChangeBlock() {
   }
 }
 
-async function getPerformanceIntervals() {
+async function getPerformanceIntervals(userId: string) {
   const intervals: TimeInterval[] = ['5D', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'];
   const results: Record<string, { absoluteReturn: number; percentageReturn: number; annualizedReturn: number | null }> = {};
   await Promise.all(
     intervals.map(async (interval) => {
       try {
-        const p = await performanceService.getPortfolioPerformance(interval);
+        const p = await performanceService.getPortfolioPerformance(userId, interval);
         results[interval] = {
           absoluteReturn: p.absoluteReturn,
           percentageReturn: p.percentageReturn,
@@ -57,9 +57,9 @@ export async function reportRoutes(fastify: FastifyInstance) {
       const start = request.query.start;
 
       const [portfolioBlock, dayChange, perfIntervals] = await Promise.all([
-        getPortfolioBlock(),
-        getDayChangeBlock(),
-        getPerformanceIntervals(),
+        getPortfolioBlock(request.userId),
+        getDayChangeBlock(request.userId),
+        getPerformanceIntervals(request.userId),
       ]);
 
       const commonPortfolio = {
@@ -73,7 +73,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
 
       if (period.data === 'monthly') {
         if (!/^\d{4}-\d{2}$/.test(start)) return reply.status(400).send({ error: 'start must be YYYY-MM for monthly' });
-        const summary = await cashFlowService.getMonthSummary(start);
+        const summary = await cashFlowService.getMonthSummary(request.userId, start);
 
         return {
           period: 'monthly',
@@ -95,7 +95,9 @@ export async function reportRoutes(fastify: FastifyInstance) {
         else if (quarter === 3) qMonths.push(`${year}-10`, `${year}-11`, `${year}-12`);
         else qMonths.push(`${year + 1}-01`, `${year + 1}-02`, `${year + 1}-03`);
 
-        const monthSummaries = await Promise.all(qMonths.map((m) => cashFlowService.getMonthSummary(m)));
+        const monthSummaries = await Promise.all(
+          qMonths.map((m) => cashFlowService.getMonthSummary(request.userId, m)),
+        );
         const totalIncome = monthSummaries.reduce((s, m) => s + m.totals.totalIncome, 0);
         const totalExpenses = monthSummaries.reduce((s, m) => s + m.totals.totalExpenses, 0);
         const totalInvested = monthSummaries.reduce((s, m) => s + m.totals.totalInvested, 0);
@@ -113,7 +115,7 @@ export async function reportRoutes(fastify: FastifyInstance) {
 
       // yearly — FY Apr to Mar
       if (!/^\d{4}$/.test(start)) return reply.status(400).send({ error: 'start must be YYYY for yearly' });
-      const yearly = await cashFlowService.getYearlySummary(start);
+      const yearly = await cashFlowService.getYearlySummary(request.userId, start);
       const totalIncome = yearly.months.reduce((s, m) => s + m.totals.totalIncome, 0);
       const totalExpenses = yearly.months.reduce((s, m) => s + m.totals.totalExpenses, 0);
       const totalInvested = yearly.months.reduce((s, m) => s + m.totals.totalInvested, 0);

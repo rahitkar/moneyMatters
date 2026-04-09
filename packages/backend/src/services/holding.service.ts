@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, getTableColumns } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import type { Holding, NewHolding } from '../db/schema.js';
@@ -19,11 +19,15 @@ export interface UpdateHoldingInput {
 }
 
 export const holdingService = {
-  async getAll(): Promise<Holding[]> {
-    return db.select().from(schema.holdings).all();
+  async getAll(userId: string): Promise<Holding[]> {
+    return db
+      .select(getTableColumns(schema.holdings))
+      .from(schema.holdings)
+      .innerJoin(schema.assets, eq(schema.holdings.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId));
   },
 
-  async getById(id: string): Promise<Holding | undefined> {
+  async getById(_userId: string, id: string): Promise<Holding | undefined> {
     const results = await db
       .select()
       .from(schema.holdings)
@@ -32,15 +36,14 @@ export const holdingService = {
     return results[0];
   },
 
-  async getByAssetId(assetId: string): Promise<Holding[]> {
+  async getByAssetId(_userId: string, assetId: string): Promise<Holding[]> {
     return db
       .select()
       .from(schema.holdings)
-      .where(eq(schema.holdings.assetId, assetId))
-      .all();
+      .where(eq(schema.holdings.assetId, assetId));
   },
 
-  async getAllWithAssets() {
+  async getAllWithAssets(userId: string) {
     return db
       .select({
         holding: schema.holdings,
@@ -48,10 +51,10 @@ export const holdingService = {
       })
       .from(schema.holdings)
       .innerJoin(schema.assets, eq(schema.holdings.assetId, schema.assets.id))
-      .all();
+      .where(eq(schema.assets.userId, userId));
   },
 
-  async create(input: CreateHoldingInput): Promise<Holding> {
+  async create(_userId: string, input: CreateHoldingInput): Promise<Holding> {
     const now = new Date();
     const newHolding: NewHolding = {
       id: nanoid(),
@@ -68,8 +71,8 @@ export const holdingService = {
     return newHolding as Holding;
   },
 
-  async update(id: string, input: UpdateHoldingInput): Promise<Holding | undefined> {
-    const existing = await this.getById(id);
+  async update(userId: string, id: string, input: UpdateHoldingInput): Promise<Holding | undefined> {
+    const existing = await this.getById(userId, id);
     if (!existing) return undefined;
 
     const updates: Partial<Holding> = {
@@ -83,15 +86,15 @@ export const holdingService = {
 
     await db.update(schema.holdings).set(updates).where(eq(schema.holdings.id, id));
 
-    return this.getById(id);
+    return this.getById(userId, id);
   },
 
-  async delete(id: string): Promise<boolean> {
+  async delete(_userId: string, id: string): Promise<boolean> {
     await db.delete(schema.holdings).where(eq(schema.holdings.id, id));
     return true;
   },
 
-  async deleteByAssetId(assetId: string): Promise<void> {
+  async deleteByAssetId(_userId: string, assetId: string): Promise<void> {
     await db.delete(schema.holdings).where(eq(schema.holdings.assetId, assetId));
   },
 };

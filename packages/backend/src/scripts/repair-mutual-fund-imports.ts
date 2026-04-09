@@ -129,7 +129,7 @@ async function mergeDuplicateGroup(
     txCount.delete(id);
   }
 
-  await transactionService.rebuildRealizedGainsForAsset(canonical.id);
+  await transactionService.rebuildRealizedGainsForAsset(canonical.userId, canonical.id);
 
   console.log(
     `Merged ${duplicates.length} duplicate MF row(s) -> ${newSymbol} (${longestName.name.slice(0, 56)}...)`
@@ -139,7 +139,7 @@ async function mergeDuplicateGroup(
 async function main(): Promise<void> {
   console.log('Repair: mutual fund imports (merge + reclassify)…\n');
 
-  const allAssets = await db.select().from(schema.assets).all();
+  const allAssets = await db.select().from(schema.assets);
   let mfAssets = allAssets.filter(isLikelyZerodhaMutualFundAsset);
   let txCount = await transactionCountsByAsset();
 
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
 
   console.log(`\nDuplicate groups merged: ${mergeCount}\n`);
 
-  const refreshed = await db.select().from(schema.assets).all();
+  const refreshed = await db.select().from(schema.assets);
   mfAssets = refreshed.filter(isLikelyZerodhaMutualFundAsset);
 
   let reclassCount = 0;
@@ -213,7 +213,14 @@ async function main(): Promise<void> {
 
   console.log(`\nRebuilding FIFO for ${mfAssetsWithSells.length} MF asset(s) with sells…`);
   for (const assetId of mfAssetsWithSells) {
-    await transactionService.rebuildRealizedGainsForAsset(assetId);
+    const [row] = await db
+      .select({ userId: schema.assets.userId })
+      .from(schema.assets)
+      .where(eq(schema.assets.id, assetId))
+      .limit(1);
+    if (row) {
+      await transactionService.rebuildRealizedGainsForAsset(row.userId, assetId);
+    }
   }
 
   console.log('\nDone.');

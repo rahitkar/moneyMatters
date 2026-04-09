@@ -54,15 +54,14 @@ function getStartDate(interval: TimeInterval, overrideStartStr?: string): Date {
 
 export const benchmarkService = {
   async getAll(): Promise<Benchmark[]> {
-    return db.select().from(schema.benchmarks).all();
+    return db.select().from(schema.benchmarks);
   },
 
   async getActive(): Promise<Benchmark[]> {
     return db
       .select()
       .from(schema.benchmarks)
-      .where(eq(schema.benchmarks.isActive, true))
-      .all();
+      .where(eq(schema.benchmarks.isActive, true));
   },
 
   async getById(id: string): Promise<Benchmark | undefined> {
@@ -134,7 +133,6 @@ export const benchmarkService = {
           .select({ date: schema.benchmarkPrices.recordedDate })
           .from(schema.benchmarkPrices)
           .where(eq(schema.benchmarkPrices.benchmarkId, benchmarkId))
-          .all()
         ).map((r) => r.date)
       );
 
@@ -205,9 +203,7 @@ export const benchmarkService = {
       })
       .from(schema.benchmarkPrices)
       .where(and(...conditions))
-      .orderBy(schema.benchmarkPrices.recordedDate)
-      .all();
-
+      .orderBy(schema.benchmarkPrices.recordedDate);
     return prices;
   },
 

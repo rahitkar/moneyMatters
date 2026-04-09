@@ -15,8 +15,11 @@ import {
   RefreshCw,
   PanelLeftClose,
   PanelLeftOpen,
+  LogOut,
+  User,
 } from 'lucide-react';
 import { useRefreshPrices } from '../api/hooks';
+import { useAuth } from '../contexts/AuthContext';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, iconColor: 'text-blue-400' },
@@ -34,6 +37,7 @@ const navigation = [
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const refreshPrices = useRefreshPrices();
+  const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
 
   const sidebarWidth = collapsed ? 'w-[68px]' : 'w-64';
@@ -106,6 +110,34 @@ export default function Layout({ children }: { children: ReactNode }) {
               {!collapsed && (refreshPrices.isPending ? 'Updating...' : 'Refresh Prices')}
             </button>
           </div>
+
+          {/* User & Logout */}
+          {user && (
+            <div className={clsx('border-t border-surface-800', collapsed ? 'p-2' : 'p-4')}>
+              {!collapsed && (
+                <div className="flex items-center gap-2 px-2 mb-2">
+                  <div className="w-7 h-7 rounded-lg bg-surface-700 flex items-center justify-center shrink-0">
+                    <User className="w-3.5 h-3.5 text-surface-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-surface-200 truncate">{user.name}</p>
+                    <p className="text-[10px] text-surface-500 truncate">{user.email}</p>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={logout}
+                title={collapsed ? 'Sign out' : undefined}
+                className={clsx(
+                  'w-full flex items-center rounded-xl py-2 text-sm text-surface-400 hover:text-red-400 hover:bg-red-500/10 transition-colors',
+                  collapsed ? 'justify-center px-0' : 'gap-3 px-4',
+                )}
+              >
+                <LogOut className="w-4 h-4 shrink-0" />
+                {!collapsed && <span>Sign out</span>}
+              </button>
+            </div>
+          )}
 
           {/* Collapse Toggle */}
           <div className={clsx('border-t border-surface-800', collapsed ? 'p-2' : 'p-4')}>

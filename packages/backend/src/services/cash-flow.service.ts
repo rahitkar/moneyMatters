@@ -45,19 +45,20 @@ export interface UpsertEntryInput {
 export const cashFlowService = {
   // ── Categories ────────────────────────────────────────────────
 
-  async getCategories(): Promise<CashFlowCategory[]> {
+  async getCategories(userId: string): Promise<CashFlowCategory[]> {
     return db
       .select()
       .from(schema.cashFlowCategories)
-      .orderBy(asc(schema.cashFlowCategories.sortOrder), asc(schema.cashFlowCategories.name))
-      .all();
+      .where(eq(schema.cashFlowCategories.userId, userId))
+      .orderBy(asc(schema.cashFlowCategories.sortOrder), asc(schema.cashFlowCategories.name));
   },
 
-  async createCategory(input: CreateCategoryInput): Promise<CashFlowCategory> {
+  async createCategory(userId: string, input: CreateCategoryInput): Promise<CashFlowCategory> {
     const id = nanoid();
     const now = new Date();
     await db.insert(schema.cashFlowCategories).values({
       id,
+      userId,
       name: input.name,
       type: input.type,
       tag: input.type === 'expense' ? (input.tag ?? 'need') : null,
@@ -68,16 +69,16 @@ export const cashFlowService = {
     return (await db
       .select()
       .from(schema.cashFlowCategories)
-      .where(eq(schema.cashFlowCategories.id, id))
+      .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)))
       .limit(1)
       .then((r) => r[0]))!;
   },
 
-  async updateCategory(id: string, input: UpdateCategoryInput): Promise<CashFlowCategory | null> {
+  async updateCategory(userId: string, id: string, input: UpdateCategoryInput): Promise<CashFlowCategory | null> {
     const existing = await db
       .select()
       .from(schema.cashFlowCategories)
-      .where(eq(schema.cashFlowCategories.id, id))
+      .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)))
       .limit(1)
       .then((r) => r[0]);
     if (!existing) return null;
@@ -90,41 +91,59 @@ export const cashFlowService = {
         ...(input.defaultBudget !== undefined && { defaultBudget: input.defaultBudget }),
         ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
       })
-      .where(eq(schema.cashFlowCategories.id, id));
+      .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)));
 
     return db
       .select()
       .from(schema.cashFlowCategories)
-      .where(eq(schema.cashFlowCategories.id, id))
+      .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)))
       .limit(1)
       .then((r) => r[0] ?? null);
   },
 
-  async deleteCategory(id: string): Promise<boolean> {
+  async deleteCategory(userId: string, id: string): Promise<boolean> {
     const result = await db
       .delete(schema.cashFlowCategories)
-      .where(eq(schema.cashFlowCategories.id, id));
+      .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)));
     return (result as any).changes > 0;
   },
 
   // ── Entries ───────────────────────────────────────────────────
 
-  async getEntriesForMonth(month: string): Promise<CashFlowEntry[]> {
+  async getEntriesForMonth(userId: string, month: string): Promise<CashFlowEntry[]> {
     return db
-      .select()
+      .select({
+        id: schema.cashFlowEntries.id,
+        categoryId: schema.cashFlowEntries.categoryId,
+        entryMonth: schema.cashFlowEntries.entryMonth,
+        budget: schema.cashFlowEntries.budget,
+        actual: schema.cashFlowEntries.actual,
+        notes: schema.cashFlowEntries.notes,
+        createdAt: schema.cashFlowEntries.createdAt,
+      })
       .from(schema.cashFlowEntries)
-      .where(eq(schema.cashFlowEntries.entryMonth, month))
-      .all();
+      .innerJoin(
+        schema.cashFlowCategories,
+        eq(schema.cashFlowEntries.categoryId, schema.cashFlowCategories.id),
+      )
+      .where(
+        and(eq(schema.cashFlowEntries.entryMonth, month), eq(schema.cashFlowCategories.userId, userId)),
+      );
   },
 
-  async upsertEntry(input: UpsertEntryInput): Promise<CashFlowEntry> {
+  async upsertEntry(userId: string, input: UpsertEntryInput): Promise<CashFlowEntry> {
     const existing = await db
-      .select()
+      .select({ id: schema.cashFlowEntries.id })
       .from(schema.cashFlowEntries)
+      .innerJoin(
+        schema.cashFlowCategories,
+        eq(schema.cashFlowEntries.categoryId, schema.cashFlowCategories.id),
+      )
       .where(
         and(
           eq(schema.cashFlowEntries.categoryId, input.categoryId),
           eq(schema.cashFlowEntries.entryMonth, input.entryMonth),
+          eq(schema.cashFlowCategories.userId, userId),
         ),
       )
       .limit(1)
@@ -166,13 +185,18 @@ export const cashFlowService = {
   },
 
   async updateEntry(
+    userId: string,
     id: string,
     data: { budget?: number; actual?: number; notes?: string },
   ): Promise<CashFlowEntry | null> {
     const existing = await db
-      .select()
+      .select({ id: schema.cashFlowEntries.id })
       .from(schema.cashFlowEntries)
-      .where(eq(schema.cashFlowEntries.id, id))
+      .innerJoin(
+        schema.cashFlowCategories,
+        eq(schema.cashFlowEntries.categoryId, schema.cashFlowCategories.id),
+      )
+      .where(and(eq(schema.cashFlowEntries.id, id), eq(schema.cashFlowCategories.userId, userId)))
       .limit(1)
       .then((r) => r[0]);
     if (!existing) return null;
@@ -194,7 +218,19 @@ export const cashFlowService = {
       .then((r) => r[0] ?? null);
   },
 
-  async deleteEntry(id: string): Promise<boolean> {
+  async deleteEntry(userId: string, id: string): Promise<boolean> {
+    const existing = await db
+      .select({ id: schema.cashFlowEntries.id })
+      .from(schema.cashFlowEntries)
+      .innerJoin(
+        schema.cashFlowCategories,
+        eq(schema.cashFlowEntries.categoryId, schema.cashFlowCategories.id),
+      )
+      .where(and(eq(schema.cashFlowEntries.id, id), eq(schema.cashFlowCategories.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]);
+    if (!existing) return false;
+
     const result = await db
       .delete(schema.cashFlowEntries)
       .where(eq(schema.cashFlowEntries.id, id));
@@ -203,16 +239,17 @@ export const cashFlowService = {
 
   // ── Monthly Income ────────────────────────────────────────────
 
-  async getIncome(month: string): Promise<MonthlyIncome | null> {
+  async getIncome(userId: string, month: string): Promise<MonthlyIncome | null> {
     return db
       .select()
       .from(schema.monthlyIncome)
-      .where(eq(schema.monthlyIncome.entryMonth, month))
+      .where(and(eq(schema.monthlyIncome.entryMonth, month), eq(schema.monthlyIncome.userId, userId)))
       .limit(1)
       .then((r) => r[0] ?? null);
   },
 
   async upsertMonthConfig(
+    userId: string,
     month: string,
     config: {
       openingBalance?: number;
@@ -222,7 +259,7 @@ export const cashFlowService = {
       notes?: string;
     },
   ): Promise<MonthlyIncome> {
-    const existing = await this.getIncome(month);
+    const existing = await this.getIncome(userId, month);
     if (existing) {
       await db
         .update(schema.monthlyIncome)
@@ -234,7 +271,7 @@ export const cashFlowService = {
           ...(config.notes !== undefined && { notes: config.notes }),
         })
         .where(eq(schema.monthlyIncome.id, existing.id));
-      return (await this.getIncome(month))!;
+      return (await this.getIncome(userId, month))!;
     }
 
     // Auto-fill targets from most recent previous month if not provided
@@ -243,7 +280,9 @@ export const cashFlowService = {
       const prev = await db
         .select()
         .from(schema.monthlyIncome)
-        .where(sql`${schema.monthlyIncome.entryMonth} < ${month}`)
+        .where(
+          and(sql`${schema.monthlyIncome.entryMonth} < ${month}`, eq(schema.monthlyIncome.userId, userId)),
+        )
         .orderBy(desc(schema.monthlyIncome.entryMonth))
         .limit(1)
         .then((r) => r[0]);
@@ -259,6 +298,7 @@ export const cashFlowService = {
     const id = nanoid();
     await db.insert(schema.monthlyIncome).values({
       id,
+      userId,
       entryMonth: month,
       salary: 0,
       otherIncome: 0,
@@ -269,14 +309,14 @@ export const cashFlowService = {
       notes: config.notes ?? null,
       createdAt: new Date(),
     });
-    return (await this.getIncome(month))!;
+    return (await this.getIncome(userId, month))!;
   },
 
   // ── Init month (copy defaults) ───────────────────────────────
 
-  async initMonth(month: string): Promise<{ created: number }> {
-    const categories = await this.getCategories();
-    const existingEntries = await this.getEntriesForMonth(month);
+  async initMonth(userId: string, month: string): Promise<{ created: number }> {
+    const categories = await this.getCategories(userId);
+    const existingEntries = await this.getEntriesForMonth(userId, month);
     const existingCategoryIds = new Set(existingEntries.map((e) => e.categoryId));
 
     let created = 0;
@@ -298,27 +338,44 @@ export const cashFlowService = {
 
   // ── Payment Methods ──────────────────────────────────────────
 
-  async getPaymentMethods(): Promise<PaymentMethod[]> {
-    return db.select().from(schema.paymentMethods).orderBy(asc(schema.paymentMethods.name)).all();
+  async getPaymentMethods(userId: string): Promise<PaymentMethod[]> {
+    return db
+      .select()
+      .from(schema.paymentMethods)
+      .where(eq(schema.paymentMethods.userId, userId))
+      .orderBy(asc(schema.paymentMethods.name));
   },
 
-  async createPaymentMethod(name: string, type: PaymentMethodType): Promise<PaymentMethod> {
+  async createPaymentMethod(userId: string, name: string, type: PaymentMethodType): Promise<PaymentMethod> {
     const id = nanoid();
-    await db.insert(schema.paymentMethods).values({ id, name, type, isActive: true, createdAt: new Date() });
-    return (await db.select().from(schema.paymentMethods).where(eq(schema.paymentMethods.id, id)).limit(1).then((r) => r[0]))!;
+    await db
+      .insert(schema.paymentMethods)
+      .values({ id, userId, name, type, isActive: true, createdAt: new Date() });
+    return (await db
+      .select()
+      .from(schema.paymentMethods)
+      .where(and(eq(schema.paymentMethods.id, id), eq(schema.paymentMethods.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]))!;
   },
 
-  async deletePaymentMethod(id: string): Promise<boolean> {
-    const result = await db.delete(schema.paymentMethods).where(eq(schema.paymentMethods.id, id));
+  async deletePaymentMethod(userId: string, id: string): Promise<boolean> {
+    const result = await db
+      .delete(schema.paymentMethods)
+      .where(and(eq(schema.paymentMethods.id, id), eq(schema.paymentMethods.userId, userId)));
     return (result as any).changes > 0;
   },
 
   // ── Spends (individual expense/income entries) ─────────────
 
-  async getSpendsForMonth(month: string): Promise<(CashFlowSpend & { categoryName: string; paymentMethodName: string })[]> {
+  async getSpendsForMonth(
+    userId: string,
+    month: string,
+  ): Promise<(CashFlowSpend & { categoryName: string; paymentMethodName: string })[]> {
     const rows = await db
       .select({
         id: schema.cashFlowSpends.id,
+        userId: schema.cashFlowSpends.userId,
         categoryId: schema.cashFlowSpends.categoryId,
         paymentMethodId: schema.cashFlowSpends.paymentMethodId,
         amount: schema.cashFlowSpends.amount,
@@ -333,25 +390,28 @@ export const cashFlowService = {
       .from(schema.cashFlowSpends)
       .innerJoin(schema.cashFlowCategories, eq(schema.cashFlowSpends.categoryId, schema.cashFlowCategories.id))
       .innerJoin(schema.paymentMethods, eq(schema.cashFlowSpends.paymentMethodId, schema.paymentMethods.id))
-      .where(eq(schema.cashFlowSpends.entryMonth, month))
-      .orderBy(desc(schema.cashFlowSpends.spendDate))
-      .all();
+      .where(and(eq(schema.cashFlowSpends.entryMonth, month), eq(schema.cashFlowSpends.userId, userId)))
+      .orderBy(desc(schema.cashFlowSpends.spendDate));
     return rows;
   },
 
-  async addSpend(input: {
-    categoryId: string;
-    paymentMethodId: string;
-    amount: number;
-    description?: string;
-    spendDate: string;
-    type: CashFlowCategoryType;
-  }): Promise<CashFlowSpend> {
+  async addSpend(
+    userId: string,
+    input: {
+      categoryId: string;
+      paymentMethodId: string;
+      amount: number;
+      description?: string;
+      spendDate: string;
+      type: CashFlowCategoryType;
+    },
+  ): Promise<CashFlowSpend> {
     const id = nanoid();
-    const cycleDay = await getCycleStartDay();
+    const cycleDay = await getCycleStartDay(userId);
     const entryMonth = getCycleMonth(input.spendDate, cycleDay);
     await db.insert(schema.cashFlowSpends).values({
       id,
+      userId,
       categoryId: input.categoryId,
       paymentMethodId: input.paymentMethodId,
       amount: input.amount,
@@ -361,21 +421,30 @@ export const cashFlowService = {
       type: input.type,
       createdAt: new Date(),
     });
-    await this._syncCategoryActual(input.categoryId, entryMonth);
+    await this._syncCategoryActual(userId, input.categoryId, entryMonth);
     return (await db.select().from(schema.cashFlowSpends).where(eq(schema.cashFlowSpends.id, id)).limit(1).then((r) => r[0]))!;
   },
 
-  async updateSpend(id: string, data: {
-    categoryId?: string;
-    paymentMethodId?: string;
-    amount?: number;
-    description?: string;
-    spendDate?: string;
-  }): Promise<CashFlowSpend | null> {
-    const existing = await db.select().from(schema.cashFlowSpends).where(eq(schema.cashFlowSpends.id, id)).limit(1).then((r) => r[0]);
+  async updateSpend(
+    userId: string,
+    id: string,
+    data: {
+      categoryId?: string;
+      paymentMethodId?: string;
+      amount?: number;
+      description?: string;
+      spendDate?: string;
+    },
+  ): Promise<CashFlowSpend | null> {
+    const existing = await db
+      .select()
+      .from(schema.cashFlowSpends)
+      .where(and(eq(schema.cashFlowSpends.id, id), eq(schema.cashFlowSpends.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]);
     if (!existing) return null;
 
-    const cycleDay = await getCycleStartDay();
+    const cycleDay = await getCycleStartDay(userId);
     const updates: Record<string, unknown> = {};
     if (data.amount !== undefined) updates.amount = data.amount;
     if (data.description !== undefined) updates.description = data.description;
@@ -393,37 +462,58 @@ export const cashFlowService = {
       await db.update(schema.cashFlowSpends).set(updates as any).where(eq(schema.cashFlowSpends.id, id));
     }
 
-    await this._syncCategoryActual(existing.categoryId, existing.entryMonth);
+    await this._syncCategoryActual(userId, existing.categoryId, existing.entryMonth);
     if (data.categoryId && data.categoryId !== existing.categoryId) {
-      await this._syncCategoryActual(data.categoryId, newEntryMonth);
+      await this._syncCategoryActual(userId, data.categoryId, newEntryMonth);
     }
     if (newEntryMonth !== existing.entryMonth) {
-      await this._syncCategoryActual(data.categoryId ?? existing.categoryId, newEntryMonth);
+      await this._syncCategoryActual(userId, data.categoryId ?? existing.categoryId, newEntryMonth);
     }
 
     return db.select().from(schema.cashFlowSpends).where(eq(schema.cashFlowSpends.id, id)).limit(1).then((r) => r[0] ?? null);
   },
 
-  async deleteSpend(id: string): Promise<boolean> {
-    const existing = await db.select().from(schema.cashFlowSpends).where(eq(schema.cashFlowSpends.id, id)).limit(1).then((r) => r[0]);
+  async deleteSpend(userId: string, id: string): Promise<boolean> {
+    const existing = await db
+      .select()
+      .from(schema.cashFlowSpends)
+      .where(and(eq(schema.cashFlowSpends.id, id), eq(schema.cashFlowSpends.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]);
     if (!existing) return false;
     await db.delete(schema.cashFlowSpends).where(eq(schema.cashFlowSpends.id, id));
-    await this._syncCategoryActual(existing.categoryId, existing.entryMonth);
+    await this._syncCategoryActual(userId, existing.categoryId, existing.entryMonth);
     return true;
   },
 
-  async _syncCategoryActual(categoryId: string, month: string): Promise<void> {
+  async _syncCategoryActual(userId: string, categoryId: string, month: string): Promise<void> {
     const sumRow = await db
       .select({ total: sql<number>`coalesce(sum(${schema.cashFlowSpends.amount}), 0)` })
       .from(schema.cashFlowSpends)
-      .where(and(eq(schema.cashFlowSpends.categoryId, categoryId), eq(schema.cashFlowSpends.entryMonth, month)))
+      .where(
+        and(
+          eq(schema.cashFlowSpends.categoryId, categoryId),
+          eq(schema.cashFlowSpends.entryMonth, month),
+          eq(schema.cashFlowSpends.userId, userId),
+        ),
+      )
       .then((r) => r[0]);
     const total = sumRow?.total ?? 0;
 
     const entry = await db
-      .select()
+      .select({ id: schema.cashFlowEntries.id })
       .from(schema.cashFlowEntries)
-      .where(and(eq(schema.cashFlowEntries.categoryId, categoryId), eq(schema.cashFlowEntries.entryMonth, month)))
+      .innerJoin(
+        schema.cashFlowCategories,
+        eq(schema.cashFlowEntries.categoryId, schema.cashFlowCategories.id),
+      )
+      .where(
+        and(
+          eq(schema.cashFlowEntries.categoryId, categoryId),
+          eq(schema.cashFlowEntries.entryMonth, month),
+          eq(schema.cashFlowCategories.userId, userId),
+        ),
+      )
       .limit(1)
       .then((r) => r[0]);
 
@@ -444,12 +534,12 @@ export const cashFlowService = {
 
   // ── Investment derivation from existing transactions ──────────
 
-  async getInvestmentBreakdown(month: string): Promise<{
+  async getInvestmentBreakdown(userId: string, month: string): Promise<{
     investments: { assetId: string; name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }[];
     walletTransfers: number;
     bankInvestments: number;
   }> {
-    const cycleDay = await getCycleStartDay();
+    const cycleDay = await getCycleStartDay(userId);
     const { start, end } = getCycleDateRange(month, cycleDay);
 
     const allTx = await db
@@ -468,17 +558,17 @@ export const cashFlowService = {
       })
       .from(schema.transactions)
       .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
-      .where(and(
-        gte(schema.transactions.transactionDate, start),
-        lte(schema.transactions.transactionDate, end),
-      ))
-      .all();
-
+      .where(
+        and(
+          eq(schema.assets.userId, userId),
+          gte(schema.transactions.transactionDate, start),
+          lte(schema.transactions.transactionDate, end),
+        ),
+      );
     const cashAssets = await db
       .select({ id: schema.assets.id, symbol: schema.assets.symbol })
       .from(schema.assets)
-      .where(eq(schema.assets.assetClass, 'cash'))
-      .all();
+      .where(and(eq(schema.assets.assetClass, 'cash'), eq(schema.assets.userId, userId)));
     const cashAssetIds = new Set(cashAssets.map((a) => a.id));
     const primaryBankId = cashAssets.find((a) => a.symbol.includes('SAVINGS-ACCOUNT'))?.id ?? null;
 
@@ -522,35 +612,35 @@ export const cashFlowService = {
   },
 
   // Compute the previous month's closing balance for auto-carry
-  async _getPreviousClosingBalance(month: string): Promise<number | null> {
+  async _getPreviousClosingBalance(userId: string, month: string): Promise<number | null> {
     const [y, m] = month.split('-').map(Number);
     const prevDate = new Date(y, m - 2, 1);
     const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
 
-    const prevIncome = await this.getIncome(prevMonth);
+    const prevIncome = await this.getIncome(userId, prevMonth);
     if (!prevIncome) return null;
 
     const prevOpeningBalance = prevIncome.openingBalance;
     if (prevOpeningBalance === null || prevOpeningBalance === undefined) {
       // Try one more level back (recursive auto-carry)
-      const deeperClosing = await this._getPreviousClosingBalance(prevMonth);
+      const deeperClosing = await this._getPreviousClosingBalance(userId, prevMonth);
       if (deeperClosing === null) return null;
       // Re-compute with the carried opening balance
-      return this._computeClosingBalance(prevMonth, deeperClosing);
+      return this._computeClosingBalance(userId, prevMonth, deeperClosing);
     }
 
-    return this._computeClosingBalance(prevMonth, prevOpeningBalance);
+    return this._computeClosingBalance(userId, prevMonth, prevOpeningBalance);
   },
 
-  async _computeClosingBalance(month: string, openingBalance: number): Promise<number | null> {
-    const spends = await this.getSpendsForMonth(month);
+  async _computeClosingBalance(userId: string, month: string, openingBalance: number): Promise<number | null> {
+    const spends = await this.getSpendsForMonth(userId, month);
     const incomeFromSpends = spends.filter((s) => s.type === 'income').reduce((s, r) => s + r.amount, 0);
-    const prevIncome = await this.getIncome(month);
+    const prevIncome = await this.getIncome(userId, month);
     const legacyIncome = (prevIncome?.salary ?? 0) + (prevIncome?.otherIncome ?? 0);
     const totalIncome = incomeFromSpends > 0 ? incomeFromSpends : legacyIncome;
 
-    const categories = await this.getCategories();
-    const entries = await this.getEntriesForMonth(month);
+    const categories = await this.getCategories(userId);
+    const entries = await this.getEntriesForMonth(userId, month);
     const categoryMap = new Map(categories.map((c) => [c.id, c]));
     const totalExpenses = entries.reduce((sum, e) => {
       const cat = categoryMap.get(e.categoryId);
@@ -558,21 +648,21 @@ export const cashFlowService = {
       return sum + (e.actual ?? 0);
     }, 0);
 
-    const breakdown = await this.getInvestmentBreakdown(month);
+    const breakdown = await this.getInvestmentBreakdown(userId, month);
 
     return openingBalance + totalIncome - totalExpenses - breakdown.bankInvestments - breakdown.walletTransfers;
   },
 
   // ── Month summary ─────────────────────────────────────────────
 
-  async getMonthSummary(month: string) {
+  async getMonthSummary(userId: string, month: string) {
     const [income, entries, categories, investmentBreakdown, spends, paymentMethods] = await Promise.all([
-      this.getIncome(month),
-      this.getEntriesForMonth(month),
-      this.getCategories(),
-      this.getInvestmentBreakdown(month),
-      this.getSpendsForMonth(month),
-      this.getPaymentMethods(),
+      this.getIncome(userId, month),
+      this.getEntriesForMonth(userId, month),
+      this.getCategories(userId),
+      this.getInvestmentBreakdown(userId, month),
+      this.getSpendsForMonth(userId, month),
+      this.getPaymentMethods(userId),
     ]);
     const investments = investmentBreakdown.investments;
     const walletTransfers = investmentBreakdown.walletTransfers;
@@ -640,7 +730,7 @@ export const cashFlowService = {
     const paymentMethodBreakdown = Array.from(pmMap, ([id, data]) => ({ id, ...data }))
       .sort((a, b) => b.total - a.total);
 
-    const cycleDay = await getCycleStartDay();
+    const cycleDay = await getCycleStartDay(userId);
     const { start: cycleStart, end: cycleEnd } = getCycleDateRange(month, cycleDay);
     const remainingForInvestment = totalIncome - totalExpenses;
 
@@ -648,7 +738,7 @@ export const cashFlowService = {
     let openingBalance = income?.openingBalance ?? null;
     const openingBalanceExplicit = openingBalance !== null;
     if (openingBalance === null) {
-      const prevClosing = await this._getPreviousClosingBalance(month);
+      const prevClosing = await this._getPreviousClosingBalance(userId, month);
       if (prevClosing !== null) openingBalance = prevClosing;
     }
     const bankOutflow = bankInvestments + walletTransfers;
@@ -716,44 +806,59 @@ export const cashFlowService = {
 
   // ── Yearly summary ────────────────────────────────────────────
 
-  async getYearlySummary(year: string) {
+  async getYearlySummary(userId: string, year: string) {
     const months: string[] = [];
     const startYear = parseInt(year, 10);
     for (let m = 4; m <= 12; m++) months.push(`${startYear}-${String(m).padStart(2, '0')}`);
     for (let m = 1; m <= 3; m++) months.push(`${startYear + 1}-${String(m).padStart(2, '0')}`);
 
-    const summaries = await Promise.all(months.map((m) => this.getMonthSummary(m)));
+    const summaries = await Promise.all(months.map((m) => this.getMonthSummary(userId, m)));
     return { year, months: summaries };
   },
 
   // ── Settings ──────────────────────────────────────────────────
 
-  async getSettings(): Promise<{ cycleStartDay: number; dob: string | null }> {
-    const cycleStartDay = await getCycleStartDay();
-    const dobRow = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, 'dob')).get();
+  async getSettings(userId: string): Promise<{ cycleStartDay: number; dob: string | null }> {
+    const cycleStartDay = await getCycleStartDay(userId);
+    const [dobRow] = await db
+      .select()
+      .from(schema.appSettings)
+      .where(and(eq(schema.appSettings.key, 'dob'), eq(schema.appSettings.userId, userId)));
     return { cycleStartDay, dob: dobRow?.value ?? null };
   },
 
-  async updateSettings(data: { cycleStartDay?: number; dob?: string }): Promise<{ cycleStartDay: number; dob: string | null }> {
+  async updateSettings(
+    userId: string,
+    data: { cycleStartDay?: number; dob?: string },
+  ): Promise<{ cycleStartDay: number; dob: string | null }> {
     if (data.cycleStartDay != null) {
       const clamped = Math.max(1, Math.min(28, Math.round(data.cycleStartDay)));
       await db
         .insert(schema.appSettings)
-        .values({ key: 'cycleStartDay', value: String(clamped) })
-        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: String(clamped) } });
-      await this._rebucketAllSpends(clamped);
+        .values({ key: 'cycleStartDay', userId, value: String(clamped) })
+        .onConflictDoUpdate({
+          target: [schema.appSettings.key, schema.appSettings.userId],
+          set: { value: String(clamped) },
+        });
+      await this._rebucketAllSpends(userId, clamped);
     }
     if (data.dob != null) {
       await db
         .insert(schema.appSettings)
-        .values({ key: 'dob', value: data.dob })
-        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: data.dob } });
+        .values({ key: 'dob', userId, value: data.dob })
+        .onConflictDoUpdate({
+          target: [schema.appSettings.key, schema.appSettings.userId],
+          set: { value: data.dob },
+        });
     }
-    return this.getSettings();
+    return this.getSettings(userId);
   },
 
-  async _rebucketAllSpends(cycleDay: number): Promise<void> {
-    const allSpends = await db.select().from(schema.cashFlowSpends).all();
+  async _rebucketAllSpends(userId: string, cycleDay: number): Promise<void> {
+    const allSpends = await db
+      .select()
+      .from(schema.cashFlowSpends)
+      .where(eq(schema.cashFlowSpends.userId, userId));
     const affectedPairs = new Set<string>();
 
     for (const spend of allSpends) {
@@ -770,7 +875,7 @@ export const cashFlowService = {
 
     for (const pair of affectedPairs) {
       const [categoryId, month] = pair.split('|');
-      await this._syncCategoryActual(categoryId, month);
+      await this._syncCategoryActual(userId, categoryId, month);
     }
   },
 };

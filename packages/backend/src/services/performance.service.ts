@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, asc, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, asc, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
 import { transactionService } from './transaction.service.js';
@@ -112,19 +112,25 @@ function getStartDate(interval: TimeInterval): Date | null {
   }
 }
 
-async function getFirstTransactionDate(allowedAssetIds?: Set<string>): Promise<string | null> {
+async function getFirstTransactionDate(
+  userId: string,
+  allowedAssetIds?: Set<string>
+): Promise<string | null> {
   if (!allowedAssetIds) {
     const row = await db
       .select({ minDate: sql<string>`MIN(${schema.transactions.transactionDate})` })
       .from(schema.transactions)
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId))
       .then((r) => r[0]);
     return row?.minDate ?? null;
   }
   const rows = await db
     .select({ date: schema.transactions.transactionDate, assetId: schema.transactions.assetId })
     .from(schema.transactions)
-    .orderBy(asc(schema.transactions.transactionDate))
-    .all();
+    .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+    .where(eq(schema.assets.userId, userId))
+    .orderBy(asc(schema.transactions.transactionDate));
   const first = rows.find((r) => allowedAssetIds.has(r.assetId));
   return first?.date ?? null;
 }
@@ -193,15 +199,20 @@ function getPriceAtDate(timeline: { date: string; price: number }[], targetDate:
 
 const BASE_NAV = 1000;
 
-async function resolveSegmentAssetIds(segments: string[]): Promise<Set<string> | undefined> {
+async function resolveSegmentAssetIds(
+  userId: string,
+  segments: string[]
+): Promise<Set<string> | undefined> {
   if (segments.length === 0 || segments.includes('all')) return undefined;
 
-  const allAssets = await db.select({
-    id: schema.assets.id,
-    assetClass: schema.assets.assetClass,
-    currency: schema.assets.currency,
-  }).from(schema.assets).all();
-
+  const allAssets = await db
+    .select({
+      id: schema.assets.id,
+      assetClass: schema.assets.assetClass,
+      currency: schema.assets.currency,
+    })
+    .from(schema.assets)
+    .where(eq(schema.assets.userId, userId));
   const ids = new Set<string>();
   for (const seg of segments) {
     const def = PORTFOLIO_SEGMENTS[seg];
@@ -314,28 +325,34 @@ export function getDimensionLabel(dim: AllocDimension, assetClass: string, symbo
 
 export const performanceService = {
   // Load all transaction and price data needed for history calculations
-  async _loadPriceTimelines(endDateStr: string, allowedAssetIds?: Set<string>) {
-    let transactions = await db
-      .select()
+  async _loadPriceTimelines(userId: string, endDateStr: string, allowedAssetIds?: Set<string>) {
+    const txRows = await db
+      .select({ tx: schema.transactions })
       .from(schema.transactions)
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(eq(schema.assets.userId, userId))
+      .orderBy(asc(schema.transactions.transactionDate));
+    let transactions = txRows.map((r) => r.tx);
 
     if (allowedAssetIds) {
       transactions = transactions.filter((tx) => allowedAssetIds.has(tx.assetId));
     }
 
-    const assets = await db.select().from(schema.assets).all();
+    const assets = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
     const currentPrices = new Map(assets.map((a) => [a.id, a.currentPrice ?? 0]));
     const currencyMap = new Map(assets.map((a) => [a.id, a.currency || 'INR']));
     const assetClassMap = new Map(assets.map((a) => [a.id, a.assetClass]));
     const symbolMap = new Map(assets.map((a) => [a.id, a.symbol]));
 
-    const priceHistoryRecords = await db
-      .select()
-      .from(schema.priceHistory)
-      .orderBy(asc(schema.priceHistory.recordedAt))
-      .all();
+    const assetIdList = assets.map((a) => a.id);
+    const priceHistoryRecords =
+      assetIdList.length > 0
+        ? await db
+            .select()
+            .from(schema.priceHistory)
+            .where(inArray(schema.priceHistory.assetId, assetIdList))
+            .orderBy(asc(schema.priceHistory.recordedAt))
+        : [];
 
     const priceTimeline = new Map<string, { date: string; price: number }[]>();
 
@@ -424,6 +441,7 @@ export const performanceService = {
   },
 
   async buildValueHistoryByDimension(
+    userId: string,
     interval: TimeInterval,
     dimension: AllocDimension
   ): Promise<{ series: { date: string; total: number; [key: string]: number | string }[] }> {
@@ -432,13 +450,13 @@ export const performanceService = {
 
     let startDate: Date | null = getStartDate(interval);
     if (!startDate) {
-      const firstTxDate = await getFirstTransactionDate();
+      const firstTxDate = await getFirstTransactionDate(userId);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
     const startDateStr = dateToLocal(startDate);
 
     const { transactions, priceTimeline, currencyMap, assetClassMap, symbolMap } =
-      await this._loadPriceTimelines(endDateStr);
+      await this._loadPriceTimelines(userId, endDateStr);
 
     if (transactions.length === 0) return { series: [] };
 
@@ -500,6 +518,7 @@ export const performanceService = {
    * Value curve: absolute portfolio value including deposits — used by Dashboard.
    */
   async buildHistories(
+    userId: string,
     startDateStr: string,
     endDateStr: string,
     interval: TimeInterval,
@@ -511,7 +530,7 @@ export const performanceService = {
     currentNAV: number;
   }> {
     const { transactions, priceTimeline, currencyMap, assetClassMap } =
-      await this._loadPriceTimelines(endDateStr, allowedAssetIds);
+      await this._loadPriceTimelines(userId, endDateStr, allowedAssetIds);
 
     if (transactions.length === 0) {
       return { navHistory: [], valueHistory: [], units: 0, currentNAV: BASE_NAV };
@@ -634,6 +653,7 @@ export const performanceService = {
 
   // Get portfolio performance for a given interval
   async getPortfolioPerformance(
+    userId: string,
     interval: TimeInterval,
     allowedAssetIds?: Set<string>,
     customStart?: string,
@@ -644,7 +664,7 @@ export const performanceService = {
 
     let startDate: Date | null = customStart ? new Date(customStart) : getStartDate(interval);
     if (!startDate) {
-      const firstTxDate = await getFirstTransactionDate(allowedAssetIds);
+      const firstTxDate = await getFirstTransactionDate(userId, allowedAssetIds);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
     const startDateStr = dateToLocal(startDate);
@@ -655,7 +675,7 @@ export const performanceService = {
     const todayStr = todayLocal();
     const isLive = endDateStr >= todayStr;
 
-    let positions = await transactionService.getAllPositions();
+    let positions = await transactionService.getAllPositions(userId);
     if (allowedAssetIds) {
       positions = positions.filter((p) => allowedAssetIds.has(p.assetId));
     }
@@ -669,11 +689,11 @@ export const performanceService = {
       currentCost += toInr(p.totalCost, cur, usdToInr);
       unrealizedGains += toInr(p.unrealizedGain, cur, usdToInr) * metalAdj;
     }
-    const realizedGains = await transactionService.getTotalRealizedGains();
+    const realizedGains = await transactionService.getTotalRealizedGains(userId);
 
     // Build both NAV and raw-value histories in a single pass
     const { navHistory, valueHistory, units: totalUnits, currentNAV } =
-      await this.buildHistories(startDateStr, endDateStr, interval, allowedAssetIds);
+      await this.buildHistories(userId, startDateStr, endDateStr, interval, allowedAssetIds);
 
     let finalNAV = currentNAV;
     let finalValue = currentValue;
@@ -727,14 +747,16 @@ export const performanceService = {
   },
 
   // Estimate portfolio value at a specific date
-  async estimatePortfolioValueAtDate(dateStr: string): Promise<number> {
-    // Get all transactions up to this date
-    const transactions = await db
-      .select()
+  async estimatePortfolioValueAtDate(userId: string, dateStr: string): Promise<number> {
+    const txRows = await db
+      .select({ tx: schema.transactions })
       .from(schema.transactions)
-      .where(lte(schema.transactions.transactionDate, dateStr))
-      .orderBy(asc(schema.transactions.transactionDate))
-      .all();
+      .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+      .where(
+        and(eq(schema.assets.userId, userId), lte(schema.transactions.transactionDate, dateStr))
+      )
+      .orderBy(asc(schema.transactions.transactionDate));
+    const transactions = txRows.map((r) => r.tx);
 
     // Calculate positions at that date
     const positions = new Map<string, { quantity: number; cost: number }>();
@@ -789,14 +811,21 @@ export const performanceService = {
 
   // Compare portfolio performance with benchmarks
   async compareWithBenchmarks(
+    userId: string,
     interval: TimeInterval,
     benchmarkSymbols: string[],
     segments?: string[],
     customStart?: string,
     customEnd?: string
   ): Promise<PerformanceComparison> {
-    const allowedAssetIds = segments ? await resolveSegmentAssetIds(segments) : undefined;
-    const portfolio = await this.getPortfolioPerformance(interval, allowedAssetIds, customStart, customEnd);
+    const allowedAssetIds = segments ? await resolveSegmentAssetIds(userId, segments) : undefined;
+    const portfolio = await this.getPortfolioPerformance(
+      userId,
+      interval,
+      allowedAssetIds,
+      customStart,
+      customEnd
+    );
     const benchmarks = await benchmarkService.getMultiplePerformance(
       benchmarkSymbols,
       interval,
@@ -809,12 +838,13 @@ export const performanceService = {
 
   // Get performance by asset class
   async getPerformanceByAssetClass(
+    userId: string,
     interval: TimeInterval
   ): Promise<AssetClassPerformance[]> {
-    const positions = await transactionService.getAllPositions();
+    const positions = await transactionService.getAllPositions(userId);
     let startDate = getStartDate(interval);
     if (!startDate) {
-      const firstTxDate = await getFirstTransactionDate();
+      const firstTxDate = await getFirstTransactionDate(userId);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
     const startDateStr = dateToLocal(startDate);
@@ -850,6 +880,7 @@ export const performanceService = {
         const cur = position.currency || 'INR';
         const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
         const historicalValue = await this.estimateAssetValueAtDate(
+          userId,
           position.assetId,
           startDateStr
         );
@@ -891,8 +922,15 @@ export const performanceService = {
   },
 
   // Estimate single asset value at a date
-  async estimateAssetValueAtDate(assetId: string, dateStr: string): Promise<number> {
-    // Get transactions up to date
+  async estimateAssetValueAtDate(userId: string, assetId: string, dateStr: string): Promise<number> {
+    const assetOk = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, assetId), eq(schema.assets.userId, userId)))
+      .limit(1)
+      .then((r) => r[0]);
+    if (!assetOk) return 0;
+
     const transactions = await db
       .select()
       .from(schema.transactions)
@@ -901,9 +939,7 @@ export const performanceService = {
           eq(schema.transactions.assetId, assetId),
           lte(schema.transactions.transactionDate, dateStr)
         )
-      )
-      .all();
-
+      );
     let quantity = 0;
     for (const tx of transactions) {
       if (tx.type === 'buy') {
@@ -947,13 +983,14 @@ export const performanceService = {
 
   // Get performance by tag
   async getPerformanceByTag(
+    userId: string,
     tagId: string,
     interval: TimeInterval
   ): Promise<TagPerformance | null> {
     const tag = await db
       .select()
       .from(schema.tags)
-      .where(eq(schema.tags.id, tagId))
+      .where(and(eq(schema.tags.id, tagId), eq(schema.tags.userId, userId)))
       .limit(1)
       .then((r) => r[0]);
 
@@ -963,9 +1000,7 @@ export const performanceService = {
     const taggedAssets = await db
       .select({ assetId: schema.assetTags.assetId })
       .from(schema.assetTags)
-      .where(eq(schema.assetTags.tagId, tagId))
-      .all();
-
+      .where(eq(schema.assetTags.tagId, tagId));
     const assetIds = new Set(taggedAssets.map((t) => t.assetId));
     if (assetIds.size === 0) {
       return {
@@ -987,7 +1022,7 @@ export const performanceService = {
       };
     }
 
-    const allPositions = await transactionService.getAllPositions();
+    const allPositions = await transactionService.getAllPositions(userId);
     const positions = allPositions.filter((p) => assetIds.has(p.assetId));
 
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
@@ -995,7 +1030,7 @@ export const performanceService = {
 
     let startDate = getStartDate(interval);
     if (!startDate) {
-      const firstTxDate = await getFirstTransactionDate();
+      const firstTxDate = await getFirstTransactionDate(userId);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
     const startDateStr = dateToLocal(startDate);
@@ -1009,7 +1044,7 @@ export const performanceService = {
     for (const position of positions) {
       const cur = position.currency || 'INR';
       const metalAdj = PHYSICAL_METAL_CLASSES.has(position.assetClass) ? METAL_SELL_FACTOR : 1;
-      const histValue = await this.estimateAssetValueAtDate(position.assetId, startDateStr);
+      const histValue = await this.estimateAssetValueAtDate(userId, position.assetId, startDateStr);
       startValue += toInr(histValue, cur, usdToInr) * metalAdj;
       endValue += toInr(position.currentValue, cur, usdToInr) * metalAdj;
       totalCost += toInr(position.totalCost, cur, usdToInr);
@@ -1041,12 +1076,12 @@ export const performanceService = {
   },
 
   // Take a daily snapshot of portfolio value (all values in INR)
-  async takeSnapshot(): Promise<PortfolioSnapshot | null> {
+  async takeSnapshot(userId: string): Promise<PortfolioSnapshot | null> {
     const today = todayLocal();
     const rateResult = await exchangeRateProvider.getRate('USD', 'INR');
     const usdToInr = rateResult?.rate ?? null;
 
-    const positions = await transactionService.getAllPositions();
+    const positions = await transactionService.getAllPositions(userId);
     let totalValue = 0;
     let totalCost = 0;
     const allocationByClass: Record<string, number> = {};
@@ -1058,12 +1093,17 @@ export const performanceService = {
       totalCost += toInr(p.totalCost, cur, usdToInr);
       allocationByClass[p.assetClass] = (allocationByClass[p.assetClass] || 0) + val;
     }
-    const realizedGains = await transactionService.getTotalRealizedGains();
+    const realizedGains = await transactionService.getTotalRealizedGains(userId);
 
     const existing = await db
       .select()
       .from(schema.portfolioSnapshots)
-      .where(eq(schema.portfolioSnapshots.snapshotDate, today))
+      .where(
+        and(
+          eq(schema.portfolioSnapshots.snapshotDate, today),
+          eq(schema.portfolioSnapshots.userId, userId)
+        )
+      )
       .limit(1);
 
     if (existing.length > 0) {
@@ -1082,6 +1122,7 @@ export const performanceService = {
 
     const snapshot = {
       id: nanoid(),
+      userId,
       snapshotDate: today,
       totalValue,
       totalCost,
@@ -1095,10 +1136,10 @@ export const performanceService = {
   },
 
   // Get all snapshots for charting
-  async getSnapshots(interval: TimeInterval): Promise<PortfolioSnapshot[]> {
+  async getSnapshots(userId: string, interval: TimeInterval): Promise<PortfolioSnapshot[]> {
     let startDate = getStartDate(interval);
     if (!startDate) {
-      const firstTxDate = await getFirstTransactionDate();
+      const firstTxDate = await getFirstTransactionDate(userId);
       startDate = firstTxDate ? new Date(firstTxDate) : new Date();
     }
     const startDateStr = dateToLocal(startDate);
@@ -1106,8 +1147,12 @@ export const performanceService = {
     return db
       .select()
       .from(schema.portfolioSnapshots)
-      .where(gte(schema.portfolioSnapshots.snapshotDate, startDateStr))
-      .orderBy(asc(schema.portfolioSnapshots.snapshotDate))
-      .all();
+      .where(
+        and(
+          eq(schema.portfolioSnapshots.userId, userId),
+          gte(schema.portfolioSnapshots.snapshotDate, startDateStr)
+        )
+      )
+      .orderBy(asc(schema.portfolioSnapshots.snapshotDate));
   },
 };
