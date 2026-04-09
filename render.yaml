@@ -3,8 +3,9 @@ services:
     name: money-matters-api
     runtime: node
     plan: free
-    buildCommand: cd packages/backend && npm install --production=false && npm run build
-    startCommand: cd packages/backend && node dist/index.js
+    rootDir: .
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @money-matters/backend build
+    startCommand: node packages/backend/dist/index.js
     envVars:
       - key: DATABASE_URL
         sync: false
