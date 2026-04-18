@@ -100,11 +100,27 @@ export const yahooFinanceProvider = {
         interval: '1d',
       });
 
-      return result.map((r) => ({
-        date: r.date,
-        close: r.close || 0,
-      }));
-    } catch (error) {
+      return result
+        .filter((r) => r.close != null)
+        .map((r) => ({
+          date: r.date,
+          close: r.close!,
+        }));
+    } catch (error: any) {
+      if (error?.message?.includes('null values')) {
+        try {
+          const result: any[] = await yf.historical(symbol, {
+            period1,
+            period2,
+            interval: '1d',
+          }, { validateResult: false });
+          return result
+            .filter((r: any) => r.close != null && r.close > 0)
+            .map((r: any) => ({ date: r.date as Date, close: r.close as number }));
+        } catch {
+          // fall through
+        }
+      }
       console.error(`Yahoo Finance historical error for ${symbol}:`, error);
       return [];
     }

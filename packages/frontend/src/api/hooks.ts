@@ -856,6 +856,42 @@ export function useDeleteSpend() {
   });
 }
 
+// ── Cash Flow Portfolio Sync hooks ──────────────────────────────
+
+export function useSyncPreview(month: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['cashflow', 'sync-preview', month] as const,
+    queryFn: () => api.get<{ cashFlowBalance: number | null; ledgerBalance: number; delta: number; primaryBankAssetId: string | null }>(`/cash-flow/sync-preview?month=${month}`),
+    enabled,
+  });
+}
+
+export function useSyncToPortfolio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (month: string) =>
+      api.post<{ synced: boolean; delta: number; transactionId?: string }>('/cash-flow/sync-to-portfolio', { month }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cashflow'] });
+      qc.invalidateQueries({ queryKey: queryKeys.positions });
+      qc.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
+    },
+  });
+}
+
+export function usePayCcBill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { month: string; amount?: number }) =>
+      api.post<{ paid: boolean; amount: number; transactionId?: string }>('/cash-flow/pay-cc-bill', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cashflow'] });
+      qc.invalidateQueries({ queryKey: queryKeys.positions });
+      qc.invalidateQueries({ queryKey: queryKeys.portfolioSummary });
+    },
+  });
+}
+
 // ── Goal hooks ──────────────────────────────────────────────────
 
 export function useGoalTargets() {

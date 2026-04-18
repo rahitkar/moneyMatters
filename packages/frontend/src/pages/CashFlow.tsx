@@ -66,6 +66,9 @@ import {
   useUpdateSpend,
   usePositions,
   useExchangeRate,
+  useSyncPreview,
+  useSyncToPortfolio,
+  usePayCcBill,
 } from '../api/hooks';
 import type {
   CashFlowCategory,
@@ -181,6 +184,12 @@ export default function CashFlow() {
 
   const upsertConfig = useUpsertMonthConfig();
   const initMonth = useInitMonth();
+
+  const [showSyncDialog, setShowSyncDialog] = useState(false);
+  const [showCcPayDialog, setShowCcPayDialog] = useState(false);
+  const { data: syncPreview, refetch: refetchSyncPreview } = useSyncPreview(selectedMonth, showSyncDialog);
+  const syncToPortfolio = useSyncToPortfolio();
+  const payCcBill = usePayCcBill();
 
   const hasData = summary && (summary.expenses.length > 0 || summary.income.totalIncome > 0 || summary.spends.length > 0);
   const hasCategories = categories && categories.length > 0;
@@ -298,8 +307,8 @@ export default function CashFlow() {
             >
               <div className="flex items-center gap-2 flex-wrap">
                 <div>
-                  <label className="block text-[10px] text-surface-500 mb-0.5">Opening Bank Balance</label>
-                  <input type="number" value={openingBalanceInput} onChange={(e) => setOpeningBalanceInput(e.target.value)} placeholder="After salary"
+                  <label className="block text-[10px] text-surface-500 mb-0.5">Current Bank Balance</label>
+                  <input type="number" value={openingBalanceInput} onChange={(e) => setOpeningBalanceInput(e.target.value)} placeholder="Current balance"
                     className="w-40 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500" autoFocus />
                 </div>
                 <div>
@@ -385,14 +394,34 @@ export default function CashFlow() {
                   ))}
                   {summary.waterfall.openingBalance != null && (
                     <div className="flex items-center justify-between py-2 border-t-2 border-brand-500/30 bg-brand-500/5 rounded-lg px-2 -mx-1 mt-1">
-                      <span className="text-brand-400 font-semibold text-xs uppercase tracking-wide">Current Bank Balance</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-brand-400 font-semibold text-xs uppercase tracking-wide">Current Bank Balance</span>
+                        <button
+                          onClick={() => { setShowSyncDialog(true); refetchSyncPreview(); }}
+                          className="text-[10px] px-2 py-0.5 rounded bg-brand-600/20 text-brand-400 hover:bg-brand-600/40 transition-colors"
+                          title="Sync this balance to your portfolio"
+                        >
+                          <RefreshCw className="w-3 h-3 inline -mt-px mr-0.5" />Sync
+                        </button>
+                      </div>
                       <span className={clsx('font-mono font-bold text-base', currentBankBalance >= 0 ? 'text-brand-400' : 'text-red-400')}>
                         {formatCurrency(currentBankBalance, 'INR')}
                       </span>
                     </div>
                   )}
                   <div className="flex items-center justify-between py-1 border-b border-surface-800">
-                    <span className="text-surface-400">− Credit Card Spends</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-surface-400">− Credit Card Spends</span>
+                      {summary.waterfall.ccBillTotal > 0 && (
+                        <button
+                          onClick={() => setShowCcPayDialog(true)}
+                          className="text-[10px] px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/40 transition-colors"
+                          title="Pay CC bill from savings account"
+                        >
+                          Pay Bill
+                        </button>
+                      )}
+                    </div>
                     <span className="font-mono font-medium text-red-400">
                       {summary.waterfall.ccBillTotal != null ? formatCurrency(summary.waterfall.ccBillTotal, 'INR') : '—'}
                     </span>
@@ -850,6 +879,97 @@ export default function CashFlow() {
 
       {/* Cycle Settings Modal */}
       <CycleSettingsModal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} currentDay={cycleStartDay} />
+
+      {/* Sync to Portfolio Dialog */}
+      <Modal isOpen={showSyncDialog} onClose={() => setShowSyncDialog(false)} title="Sync to Portfolio">
+        <div className="space-y-4">
+          {syncPreview ? (
+            syncPreview.primaryBankAssetId == null ? (
+              <p className="text-surface-400 text-sm">No primary savings account found. Create a cash asset with "SAVINGS-ACCOUNT" in the symbol.</p>
+            ) : syncPreview.cashFlowBalance == null ? (
+              <p className="text-surface-400 text-sm">No opening balance set for this month. Set your Current Bank Balance first.</p>
+            ) : Math.abs(syncPreview.delta) < 0.01 ? (
+              <div className="text-center py-4">
+                <Check className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                <p className="text-green-400 font-semibold">Already in sync!</p>
+                <p className="text-surface-500 text-xs mt-1">Cash flow and portfolio balances match.</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-surface-400">Cash Flow Balance</span>
+                    <span className="text-surface-100 font-mono">{formatCurrency(syncPreview.cashFlowBalance, 'INR')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-surface-400">Portfolio Ledger Balance</span>
+                    <span className="text-surface-100 font-mono">{formatCurrency(syncPreview.ledgerBalance, 'INR')}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-surface-700 pt-2">
+                    <span className="text-surface-300 font-semibold">Difference</span>
+                    <span className={clsx('font-mono font-bold', syncPreview.delta >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {syncPreview.delta >= 0 ? '+' : ''}{formatCurrency(syncPreview.delta, 'INR')}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-surface-500 text-xs">
+                  This will create a {syncPreview.delta > 0 ? 'deposit' : 'withdrawal'} transaction of {formatCurrency(Math.abs(syncPreview.delta), 'INR')} on your savings account to match the cash flow balance.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowSyncDialog(false)} className="btn btn-secondary text-sm">Cancel</button>
+                  <button
+                    onClick={() => {
+                      syncToPortfolio.mutate(selectedMonth, {
+                        onSuccess: () => setShowSyncDialog(false),
+                      });
+                    }}
+                    disabled={syncToPortfolio.isPending}
+                    className="btn btn-primary text-sm"
+                  >
+                    {syncToPortfolio.isPending ? 'Syncing...' : 'Confirm Sync'}
+                  </button>
+                </div>
+              </>
+            )
+          ) : (
+            <p className="text-surface-500 text-sm">Loading preview...</p>
+          )}
+          {(syncPreview?.primaryBankAssetId == null || syncPreview?.cashFlowBalance == null || Math.abs(syncPreview?.delta ?? 0) < 0.01) && (
+            <div className="flex justify-end">
+              <button onClick={() => setShowSyncDialog(false)} className="btn btn-secondary text-sm">Close</button>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Pay CC Bill Dialog */}
+      <Modal isOpen={showCcPayDialog} onClose={() => setShowCcPayDialog(false)} title="Pay Credit Card Bill">
+        <div className="space-y-4">
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-surface-400">CC Spends for {monthLabel(selectedMonth)}</span>
+              <span className="text-red-400 font-mono font-bold">{formatCurrency(summary?.waterfall.ccBillTotal ?? 0, 'INR')}</span>
+            </div>
+          </div>
+          <p className="text-surface-500 text-xs">
+            This will create a withdrawal transaction of {formatCurrency(summary?.waterfall.ccBillTotal ?? 0, 'INR')} from your savings account to pay the credit card bill.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowCcPayDialog(false)} className="btn btn-secondary text-sm">Cancel</button>
+            <button
+              onClick={() => {
+                payCcBill.mutate({ month: selectedMonth }, {
+                  onSuccess: () => setShowCcPayDialog(false),
+                });
+              }}
+              disabled={payCcBill.isPending || (summary?.waterfall.ccBillTotal ?? 0) <= 0}
+              className="btn btn-primary text-sm"
+            >
+              {payCcBill.isPending ? 'Processing...' : 'Pay CC Bill'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

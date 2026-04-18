@@ -12,6 +12,7 @@ import type {
   ExpenseTag,
 } from '../db/schema.js';
 import { getCycleMonth, getCycleDateRange, getCycleStartDay } from './cycle.utils.js';
+import { transactionService } from './transaction.service.js';
 
 // ── Category CRUD ─────────────────────────────────────────────────
 
@@ -271,6 +272,13 @@ export const cashFlowService = {
           ...(config.notes !== undefined && { notes: config.notes }),
         })
         .where(eq(schema.monthlyIncome.id, existing.id));
+
+      if (config.openingBalance !== undefined) {
+        await this.applySyncToPortfolio(userId, month).catch((err) => {
+          console.warn('Auto-sync to portfolio failed:', err);
+        });
+      }
+
       return (await this.getIncome(userId, month))!;
     }
 
@@ -309,6 +317,13 @@ export const cashFlowService = {
       notes: config.notes ?? null,
       createdAt: new Date(),
     });
+
+    if (config.openingBalance !== undefined) {
+      await this.applySyncToPortfolio(userId, month).catch((err) => {
+        console.warn('Auto-sync to portfolio failed:', err);
+      });
+    }
+
     return (await this.getIncome(userId, month))!;
   },
 
@@ -877,5 +892,115 @@ export const cashFlowService = {
       const [categoryId, month] = pair.split('|');
       await this._syncCategoryActual(userId, categoryId, month);
     }
+  },
+
+  // ── Portfolio Sync ───────────────────────────────────────────────
+
+  async _findPrimaryBankAsset(userId: string): Promise<{ id: string; symbol: string } | null> {
+    const cashAssets = await db
+      .select({ id: schema.assets.id, symbol: schema.assets.symbol })
+      .from(schema.assets)
+      .where(and(eq(schema.assets.assetClass, 'cash'), eq(schema.assets.userId, userId)));
+    return cashAssets.find((a) => a.symbol.includes('SAVINGS-ACCOUNT')) ?? null;
+  },
+
+  async _getLedgerBalance(userId: string, assetId: string): Promise<number> {
+    const position = await transactionService.getPositionForAsset(userId, assetId);
+    return position?.currentValue ?? 0;
+  },
+
+  async _getCashFlowBankBalance(userId: string, month: string): Promise<number | null> {
+    const summary = await this.getMonthSummary(userId, month);
+    if (summary.waterfall.openingBalance == null) return null;
+    const ob = summary.waterfall.openingBalance;
+    const bi = summary.waterfall.bankInvestments ?? 0;
+    const wt = summary.waterfall.walletTransfers ?? 0;
+    return ob + summary.waterfall.totalIncome - bi - wt - summary.waterfall.cashUpiExpenses;
+  },
+
+  async syncPreview(userId: string, month: string): Promise<{
+    cashFlowBalance: number | null;
+    ledgerBalance: number;
+    delta: number;
+    primaryBankAssetId: string | null;
+  }> {
+    const bankAsset = await this._findPrimaryBankAsset(userId);
+    if (!bankAsset) {
+      return { cashFlowBalance: null, ledgerBalance: 0, delta: 0, primaryBankAssetId: null };
+    }
+
+    const cashFlowBalance = await this._getCashFlowBankBalance(userId, month);
+    const ledgerBalance = await this._getLedgerBalance(userId, bankAsset.id);
+    const delta = cashFlowBalance != null ? cashFlowBalance - ledgerBalance : 0;
+
+    return { cashFlowBalance, ledgerBalance, delta, primaryBankAssetId: bankAsset.id };
+  },
+
+  async applySyncToPortfolio(userId: string, month: string): Promise<{
+    synced: boolean;
+    delta: number;
+    transactionId?: string;
+  }> {
+    const preview = await this.syncPreview(userId, month);
+    if (!preview.primaryBankAssetId || preview.cashFlowBalance == null) {
+      return { synced: false, delta: 0 };
+    }
+
+    const delta = preview.delta;
+    if (Math.abs(delta) < 0.01) {
+      return { synced: true, delta: 0 };
+    }
+
+    const [y, m] = month.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const txDate = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+    const tx = await transactionService.create(userId, {
+      userId,
+      assetId: preview.primaryBankAssetId,
+      type: delta > 0 ? 'buy' : 'sell',
+      quantity: Math.abs(delta),
+      price: 1,
+      fees: 0,
+      transactionDate: txDate,
+      notes: `Cash flow sync — ${month}`,
+    });
+
+    return { synced: true, delta, transactionId: tx.id };
+  },
+
+  async payCcBill(userId: string, month: string, amount?: number): Promise<{
+    paid: boolean;
+    amount: number;
+    transactionId?: string;
+  }> {
+    const bankAsset = await this._findPrimaryBankAsset(userId);
+    if (!bankAsset) {
+      throw new Error('No primary savings account found');
+    }
+
+    let ccTotal = amount ?? 0;
+    if (ccTotal <= 0) {
+      const summary = await this.getMonthSummary(userId, month);
+      ccTotal = summary.waterfall.ccBillTotal;
+    }
+    if (ccTotal <= 0) {
+      return { paid: false, amount: 0 };
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const tx = await transactionService.create(userId, {
+      userId,
+      assetId: bankAsset.id,
+      type: 'sell',
+      quantity: ccTotal,
+      price: 1,
+      fees: 0,
+      transactionDate: today,
+      notes: `CC bill payment — ${month}`,
+    });
+
+    return { paid: true, amount: ccTotal, transactionId: tx.id };
   },
 };

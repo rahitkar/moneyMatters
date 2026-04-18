@@ -240,6 +240,38 @@ export async function cashFlowRoutes(fastify: FastifyInstance) {
     },
   );
 
+  // ── Portfolio Sync ──────────────────────────────────────────
+
+  fastify.get<{ Querystring: { month: string } }>(
+    '/sync-preview',
+    async (request, reply) => {
+      const month = monthSchema.safeParse(request.query.month);
+      if (!month.success) return reply.status(400).send({ error: 'Invalid month format (YYYY-MM)' });
+      const preview = await cashFlowService.syncPreview(request.userId, month.data);
+      return preview;
+    },
+  );
+
+  fastify.post<{ Body: { month: string } }>(
+    '/sync-to-portfolio',
+    async (request, reply) => {
+      const month = monthSchema.safeParse(request.body.month);
+      if (!month.success) return reply.status(400).send({ error: 'Invalid month format (YYYY-MM)' });
+      const result = await cashFlowService.applySyncToPortfolio(request.userId, month.data);
+      return result;
+    },
+  );
+
+  fastify.post<{ Body: { month: string; amount?: number } }>(
+    '/pay-cc-bill',
+    async (request, reply) => {
+      const month = monthSchema.safeParse(request.body.month);
+      if (!month.success) return reply.status(400).send({ error: 'Invalid month format (YYYY-MM)' });
+      const result = await cashFlowService.payCcBill(request.userId, month.data, request.body.amount);
+      return result;
+    },
+  );
+
   // ── Spends ───────────────────────────────────────────────────
 
   fastify.get<{ Querystring: { month: string } }>(
