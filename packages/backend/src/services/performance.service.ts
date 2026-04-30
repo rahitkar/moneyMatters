@@ -333,11 +333,46 @@ export const performanceService = {
       .orderBy(asc(schema.transactions.transactionDate));
     let transactions = txRows.map((r) => r.tx);
 
+    const assets = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
+    const cashLikeClasses = new Set(['cash', 'lended', 'fixed_deposit', 'ppf', 'epf']);
+    const cashLikeAssetIds = new Set(assets.filter((a) => cashLikeClasses.has(a.assetClass)).map((a) => a.id));
+
+    // Synthesize virtual transactions for fund-source deductions on cash-like assets.
+    // When asset X is bought using cash asset Y as fundSource, Y's balance decreases.
+    for (const tx of txRows.map((r) => r.tx)) {
+      if (!tx.fundSourceId || !cashLikeAssetIds.has(tx.fundSourceId)) continue;
+      const amount = tx.quantity * tx.price + (tx.fees ?? 0);
+      if (tx.type === 'buy') {
+        transactions.push({
+          ...tx,
+          id: `_fs_${tx.id}`,
+          assetId: tx.fundSourceId,
+          type: 'sell',
+          quantity: amount,
+          price: 1,
+          fees: 0,
+          fundSourceId: null,
+        });
+      } else {
+        const returnAmount = tx.quantity * tx.price - (tx.fees ?? 0);
+        transactions.push({
+          ...tx,
+          id: `_fs_${tx.id}`,
+          assetId: tx.fundSourceId,
+          type: 'buy',
+          quantity: returnAmount,
+          price: 1,
+          fees: 0,
+          fundSourceId: null,
+        });
+      }
+    }
+
+    transactions.sort((a, b) => a.transactionDate.localeCompare(b.transactionDate));
+
     if (allowedAssetIds) {
       transactions = transactions.filter((tx) => allowedAssetIds.has(tx.assetId));
     }
-
-    const assets = await db.select().from(schema.assets).where(eq(schema.assets.userId, userId));
     const currentPrices = new Map(assets.map((a) => [a.id, a.currentPrice ?? 0]));
     const currencyMap = new Map(assets.map((a) => [a.id, a.currency || 'INR']));
     const assetClassMap = new Map(assets.map((a) => [a.id, a.assetClass]));
