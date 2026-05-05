@@ -23,7 +23,7 @@ import {
   useRecordAllocations,
 } from '../api/hooks';
 import { formatCurrency, formatPercent } from '../lib/format';
-import type { SavingsGoal, SavingsGoalBucket, GoalLink, GoalContribution } from '../api/types';
+import type { SavingsGoal, SavingsGoalBucket, GoalLink, GoalContribution, GoalProgress } from '../api/types';
 
 const BUCKET_COLORS = [
   '#6366f1', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6',
@@ -509,7 +509,7 @@ export default function SavingsGoals() {
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
 
   const progressMap = useMemo(() => {
-    const map = new Map<string, (typeof progressData)['goals'][0]>();
+    const map = new Map<string, GoalProgress>();
     for (const p of progressData?.goals ?? []) {
       map.set(p.goalId, p);
     }
