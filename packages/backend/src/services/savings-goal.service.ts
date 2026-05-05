@@ -102,16 +102,22 @@ export const savingsGoalService = {
   },
 
   async deleteBucket(userId: string, id: string): Promise<boolean> {
-    // Ungroup goals in this bucket first
+    const existing = await db
+      .select()
+      .from(schema.savingsGoalBuckets)
+      .where(and(eq(schema.savingsGoalBuckets.id, id), eq(schema.savingsGoalBuckets.userId, userId)))
+      .then((r) => r[0] ?? null);
+    if (!existing) return false;
+
     await db
       .update(schema.savingsGoals)
       .set({ bucketId: null } as any)
       .where(and(eq(schema.savingsGoals.bucketId, id), eq(schema.savingsGoals.userId, userId)));
 
-    const result = await db
+    await db
       .delete(schema.savingsGoalBuckets)
       .where(and(eq(schema.savingsGoalBuckets.id, id), eq(schema.savingsGoalBuckets.userId, userId)));
-    return (result as any).rowCount > 0;
+    return true;
   },
 
   // ── Goals ────────────────────────────────────────────────────────
@@ -191,10 +197,12 @@ export const savingsGoalService = {
   },
 
   async deleteGoal(userId: string, id: string): Promise<boolean> {
-    const result = await db
+    const existing = await this.getGoalById(userId, id);
+    if (!existing) return false;
+    await db
       .delete(schema.savingsGoals)
       .where(and(eq(schema.savingsGoals.id, id), eq(schema.savingsGoals.userId, userId)));
-    return (result as any).rowCount > 0;
+    return true;
   },
 
   async completeGoal(userId: string, id: string): Promise<SavingsGoal | null> {
@@ -350,12 +358,13 @@ export const savingsGoalService = {
   // ── Cash Flow Allocations ────────────────────────────────────────
 
   async previewAllocations(userId: string, month: string): Promise<{
-    monthlySavings: number;
+    monthlyIncome: number;
     totalAllocatedPercent: number;
+    totalEarmarked: number;
     allocations: GoalAllocation[];
   }> {
     const summary = await cashFlowService.getMonthSummary(userId, month);
-    const monthlySavings = Math.max(0, summary.totals.savings ?? 0);
+    const monthlyIncome = summary.totals.totalIncome ?? 0;
 
     const goals = await db
       .select()
@@ -376,10 +385,12 @@ export const savingsGoalService = {
         goalId: g.id,
         goalName: g.name,
         savingsPercent: g.savingsPercent,
-        allocatedAmount: Math.round((monthlySavings * g.savingsPercent) / 100 * 100) / 100,
+        allocatedAmount: Math.round((monthlyIncome * g.savingsPercent) / 100 * 100) / 100,
       }));
 
-    return { monthlySavings, totalAllocatedPercent, allocations };
+    const totalEarmarked = allocations.reduce((s, a) => s + a.allocatedAmount, 0);
+
+    return { monthlyIncome, totalAllocatedPercent, totalEarmarked, allocations };
   },
 
   async recordAllocations(userId: string, month: string): Promise<SavingsGoalContribution[]> {

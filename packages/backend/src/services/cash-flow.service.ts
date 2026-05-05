@@ -103,10 +103,10 @@ export const cashFlowService = {
   },
 
   async deleteCategory(userId: string, id: string): Promise<boolean> {
-    const result = await db
+    await db
       .delete(schema.cashFlowCategories)
       .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)));
-    return (result as any).rowCount > 0;
+    return true;
   },
 
   // ── Entries ───────────────────────────────────────────────────
@@ -375,10 +375,10 @@ export const cashFlowService = {
   },
 
   async deletePaymentMethod(userId: string, id: string): Promise<boolean> {
-    const result = await db
+    await db
       .delete(schema.paymentMethods)
       .where(and(eq(schema.paymentMethods.id, id), eq(schema.paymentMethods.userId, userId)));
-    return (result as any).rowCount > 0;
+    return true;
   },
 
   // ── Spends (individual expense/income entries) ─────────────

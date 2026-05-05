@@ -435,6 +435,16 @@ export default function CashFlow() {
                       {formatCurrency(summary.waterfall.savings, 'INR')}
                     </span>
                   </div>
+                  {goalAllocations && goalAllocations.totalEarmarked > 0 && (
+                    <div className="flex items-center justify-between py-1 text-xs">
+                      <span className="text-indigo-400 flex items-center gap-1">
+                        <Target className="w-3 h-3" /> Earmarked for Goals
+                      </span>
+                      <span className="font-mono text-indigo-400">
+                        {formatCurrency(goalAllocations.totalEarmarked, 'INR')}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -478,25 +488,31 @@ export default function CashFlow() {
             />
           </div>
 
-          {/* Goals Allocation */}
+          {/* Goals Allocation — Earmarked Money */}
           {goalAllocations && goalAllocations.allocations.length > 0 && (
-            <Card padding="sm">
-              <div className="flex items-center justify-between mb-2">
+            <Card padding="sm" className="border border-indigo-500/20">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Target className="w-4 h-4 text-indigo-400" />
-                  <span className="text-sm font-medium text-surface-300">Goals Allocation</span>
+                  <span className="text-sm font-medium text-surface-200">Earmarked for Goals</span>
                 </div>
-                <span className="text-xs text-surface-500">{goalAllocations.totalAllocatedPercent}% of savings</span>
+                <div className="text-right">
+                  <span className="text-sm font-bold text-indigo-400">{formatCurrency(goalAllocations.totalEarmarked, 'INR')}</span>
+                  <span className="text-[10px] text-surface-500 ml-1.5">({goalAllocations.totalAllocatedPercent}% of income)</span>
+                </div>
               </div>
               <div className="flex gap-2 flex-wrap">
                 {goalAllocations.allocations.map((a) => (
-                  <div key={a.goalId} className="text-xs bg-surface-800 rounded-lg px-2.5 py-1.5">
-                    <span className="text-surface-400">{a.goalName}</span>
-                    <span className="text-surface-100 font-medium ml-1.5">{formatCurrency(a.allocatedAmount, 'INR')}</span>
+                  <div key={a.goalId} className="text-xs bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2.5 py-1.5">
+                    <span className="text-surface-300">{a.goalName}</span>
+                    <span className="text-indigo-300 font-medium ml-1.5">{formatCurrency(a.allocatedAmount, 'INR')}</span>
                     <span className="text-surface-600 ml-1">({a.savingsPercent}%)</span>
                   </div>
                 ))}
               </div>
+              <p className="text-[10px] text-surface-600 mt-2">
+                This amount is earmarked from your income toward savings goals. It is not deducted from your cash flow.
+              </p>
             </Card>
           )}
 

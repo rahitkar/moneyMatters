@@ -627,8 +627,9 @@ export interface GoalProgressSummary {
 }
 
 export interface GoalAllocationsPreview {
-  monthlySavings: number;
+  monthlyIncome: number;
   totalAllocatedPercent: number;
+  totalEarmarked: number;
   allocations: GoalAllocation[];
 }
 

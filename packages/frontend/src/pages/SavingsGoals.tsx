@@ -123,7 +123,7 @@ function GoalFormModal({ isOpen, onClose, goal, buckets }: GoalFormProps) {
             />
           </div>
           <div>
-            <label className="block text-xs text-surface-400 mb-1">Savings % of Monthly Surplus</label>
+            <label className="block text-xs text-surface-400 mb-1">% of Monthly Income</label>
             <input
               className="input w-full" type="number" min="0" max="100" step="0.5"
               value={savingsPercent} onChange={(e) => setSavingsPercent(e.target.value)}
@@ -340,7 +340,7 @@ function GoalDetailPanel({
                 <Wallet className="w-4 h-4 text-surface-500" />
                 <span className="text-surface-400">Monthly allocation:</span>
                 <span className="text-surface-100 font-medium">{goal.savingsPercent}%</span>
-                <span className="text-surface-500">of savings</span>
+                <span className="text-surface-500">of income</span>
               </div>
             </Card>
 
@@ -419,14 +419,18 @@ function GoalDetailPanel({
 // ── Goal Card ───────────────────────────────────────────────────
 
 function GoalCard({
-  goal, progress, onClick, onComplete, onDelete,
+  goal, progress, onClick, onComplete, onDelete, onUpdateAllocation,
 }: {
   goal: SavingsGoal;
   progress?: { totalSaved: number; percentComplete: number; remaining: number; daysRemaining: number | null; isOnTrack: boolean };
   onClick: () => void;
   onComplete: () => void;
   onDelete: () => void;
+  onUpdateAllocation: (percent: number) => void;
 }) {
+  const [editingAlloc, setEditingAlloc] = useState(false);
+  const [allocValue, setAllocValue] = useState(String(goal.savingsPercent));
+
   return (
     <Card
       className={clsx(
@@ -446,10 +450,38 @@ function GoalCard({
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">Done</span>
             )}
           </div>
-          <p className="text-xs text-surface-500 mt-0.5">
-            {formatCurrency(progress?.totalSaved ?? 0, 'INR')} / {formatCurrency(goal.targetAmount, 'INR')}
-            {goal.savingsPercent > 0 && <span className="ml-2 text-brand-400">{goal.savingsPercent}%</span>}
-          </p>
+          <div className="flex items-center text-xs text-surface-500 mt-0.5">
+            <span>{formatCurrency(progress?.totalSaved ?? 0, 'INR')} / {formatCurrency(goal.targetAmount, 'INR')}</span>
+            {editingAlloc ? (
+              <span className="ml-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="number" min="0" max="100" step="0.5"
+                  className="w-14 px-1 py-0 rounded bg-surface-800 border border-brand-500 text-brand-400 text-xs text-right focus:outline-none"
+                  value={allocValue}
+                  onChange={(e) => setAllocValue(e.target.value)}
+                  onBlur={() => {
+                    const v = parseFloat(allocValue) || 0;
+                    onUpdateAllocation(v);
+                    setEditingAlloc(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    if (e.key === 'Escape') { setAllocValue(String(goal.savingsPercent)); setEditingAlloc(false); }
+                  }}
+                  autoFocus
+                />
+                <span className="text-[10px] text-surface-600">%</span>
+              </span>
+            ) : (
+              <button
+                className="ml-2 text-brand-400 hover:text-brand-300 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setAllocValue(String(goal.savingsPercent)); setEditingAlloc(true); }}
+                title="Edit allocation %"
+              >
+                {goal.savingsPercent}%
+              </button>
+            )}
+          </div>
           {/* Progress bar */}
           <div className="h-1.5 bg-surface-700 rounded-full mt-2 overflow-hidden">
             <div
@@ -499,6 +531,7 @@ export default function SavingsGoals() {
 
   const completeGoal = useCompleteSavingsGoal();
   const deleteGoal = useDeleteSavingsGoal();
+  const updateGoal = useUpdateSavingsGoal();
   const deleteBucket = useDeleteSavingsGoalBucket();
   const recordAlloc = useRecordAllocations();
 
@@ -594,7 +627,7 @@ export default function SavingsGoals() {
                 Monthly Allocation ({currentMonth})
               </h3>
               <p className="text-xs text-surface-500">
-                Savings: {formatCurrency(allocations.monthlySavings, 'INR')} · {allocations.totalAllocatedPercent}% allocated
+                Income: {formatCurrency(allocations.monthlyIncome, 'INR')} · {allocations.totalAllocatedPercent}% earmarked
               </p>
             </div>
             <button
@@ -658,6 +691,7 @@ export default function SavingsGoals() {
                           onClick={() => setDetailGoal(goal)}
                           onComplete={() => completeGoal.mutate(goal.id)}
                           onDelete={() => deleteGoal.mutate(goal.id)}
+                          onUpdateAllocation={(p) => updateGoal.mutate({ id: goal.id, savingsPercent: p })}
                         />
                       ))}
                     </div>
@@ -680,6 +714,7 @@ export default function SavingsGoals() {
                       onClick={() => setDetailGoal(goal)}
                       onComplete={() => completeGoal.mutate(goal.id)}
                       onDelete={() => deleteGoal.mutate(goal.id)}
+                      onUpdateAllocation={(p) => updateGoal.mutate({ id: goal.id, savingsPercent: p })}
                     />
                   ))}
                 </div>
