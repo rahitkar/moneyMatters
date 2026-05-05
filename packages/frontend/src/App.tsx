@@ -11,6 +11,7 @@ import FireSimulator from './pages/FireSimulator';
 import Import from './pages/Import';
 import Reports from './pages/Reports';
 import Help from './pages/Help';
+import SavingsGoals from './pages/SavingsGoals';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -24,6 +25,7 @@ function ProtectedRoutes() {
         <Route path="/performance" element={<Performance />} />
         <Route path="/cash-flow" element={<CashFlow />} />
         <Route path="/fire" element={<FireSimulator />} />
+        <Route path="/savings-goals" element={<SavingsGoals />} />
         <Route path="/tags" element={<Tags />} />
         <Route path="/import" element={<Import />} />
         <Route path="/reports" element={<Reports />} />

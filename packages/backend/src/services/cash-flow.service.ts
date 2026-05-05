@@ -106,7 +106,7 @@ export const cashFlowService = {
     const result = await db
       .delete(schema.cashFlowCategories)
       .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)));
-    return (result as any).changes > 0;
+    return (result as any).rowCount > 0;
   },
 
   // ── Entries ───────────────────────────────────────────────────
@@ -232,10 +232,10 @@ export const cashFlowService = {
       .then((r) => r[0]);
     if (!existing) return false;
 
-    const result = await db
+    await db
       .delete(schema.cashFlowEntries)
       .where(eq(schema.cashFlowEntries.id, id));
-    return (result as any).changes > 0;
+    return true;
   },
 
   // ── Monthly Income ────────────────────────────────────────────
@@ -378,7 +378,7 @@ export const cashFlowService = {
     const result = await db
       .delete(schema.paymentMethods)
       .where(and(eq(schema.paymentMethods.id, id), eq(schema.paymentMethods.userId, userId)));
-    return (result as any).changes > 0;
+    return (result as any).rowCount > 0;
   },
 
   // ── Spends (individual expense/income entries) ─────────────

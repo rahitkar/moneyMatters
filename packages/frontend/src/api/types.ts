@@ -545,6 +545,93 @@ export interface FireMonthlyTargetData {
   months: FireMonthlyTargetMonth[];
 }
 
+// ── Savings Goals ──────────────────────────────────────────────────
+
+export interface SavingsGoalBucket {
+  id: string;
+  userId: string;
+  name: string;
+  color: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface GoalLink {
+  label: string;
+  url: string;
+}
+
+export interface SavingsGoal {
+  id: string;
+  userId: string;
+  bucketId: string | null;
+  name: string;
+  description: string | null;
+  links: string | null; // JSON string of GoalLink[]
+  targetAmount: number;
+  currency: string;
+  deadline: string | null;
+  savingsPercent: number;
+  icon: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  isCompleted: boolean;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface GoalContribution {
+  id: string;
+  goalId: string;
+  entryMonth: string;
+  autoAmount: number;
+  manualAmount: number | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface GoalProgress {
+  goalId: string;
+  goalName: string;
+  bucketId: string | null;
+  bucketName: string | null;
+  targetAmount: number;
+  totalSaved: number;
+  percentComplete: number;
+  remaining: number;
+  deadline: string | null;
+  daysRemaining: number | null;
+  isOnTrack: boolean;
+  savingsPercent: number;
+  icon: string | null;
+  isCompleted: boolean;
+}
+
+export interface GoalAllocation {
+  goalId: string;
+  goalName: string;
+  savingsPercent: number;
+  allocatedAmount: number;
+}
+
+export interface GoalProgressSummary {
+  goals: GoalProgress[];
+  summary: {
+    totalTarget: number;
+    totalSaved: number;
+    onTrack: number;
+    behind: number;
+    completed: number;
+    activeCount: number;
+  };
+}
+
+export interface GoalAllocationsPreview {
+  monthlySavings: number;
+  totalAllocatedPercent: number;
+  allocations: GoalAllocation[];
+}
+
 // API Response types
 export interface ApiResponse<T> {
   [key: string]: T;

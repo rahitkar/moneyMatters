@@ -15,6 +15,13 @@
       "when": 1775701851341,
       "tag": "0001_dazzling_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777774722645,
+      "tag": "0002_rapid_liz_osborn",
+      "breakpoints": true
     }
   ]
 }

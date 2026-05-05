@@ -15,6 +15,7 @@ import { cashFlowRoutes } from './routes/cash-flow.js';
 import { goalRoutes } from './routes/goals.js';
 import { fireRoutes } from './routes/fire.js';
 import { reportRoutes } from './routes/reports.js';
+import { savingsGoalRoutes } from './routes/savings-goals.js';
 import { startPriceUpdateScheduler } from './services/scheduler.service.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -67,6 +68,7 @@ fastify.register(cashFlowRoutes, { prefix: '/api/cash-flow' });
 fastify.register(goalRoutes, { prefix: '/api/goals' });
 fastify.register(fireRoutes, { prefix: '/api/fire' });
 fastify.register(reportRoutes, { prefix: '/api/reports' });
+fastify.register(savingsGoalRoutes, { prefix: '/api/savings-goals' });
 
 // Health check
 fastify.get('/api/health', async () => {

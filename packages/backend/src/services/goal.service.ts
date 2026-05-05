@@ -103,7 +103,7 @@ export const goalService = {
     const result = await db
       .delete(schema.netWorthTargets)
       .where(and(eq(schema.netWorthTargets.id, id), eq(schema.netWorthTargets.userId, userId)));
-    return (result as any).changes > 0;
+    return (result as any).rowCount > 0;
   },
 
   async getProjection(userId: string, id: string): Promise<{

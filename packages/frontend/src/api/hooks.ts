@@ -1027,3 +1027,131 @@ export function useReport(period: 'monthly' | 'quarterly' | 'yearly', start: str
     enabled: !!start,
   });
 }
+
+// ============ SAVINGS GOALS ============
+
+export function useSavingsGoals() {
+  return useQuery({
+    queryKey: ['savings-goals'] as const,
+    queryFn: () => api.get<{ goals: import('./types').SavingsGoal[] }>('/savings-goals').then((r) => r.goals),
+  });
+}
+
+export function useSavingsGoalBuckets() {
+  return useQuery({
+    queryKey: ['savings-goals', 'buckets'] as const,
+    queryFn: () => api.get<{ buckets: import('./types').SavingsGoalBucket[] }>('/savings-goals/buckets').then((r) => r.buckets),
+  });
+}
+
+export function useGoalProgressAll() {
+  return useQuery({
+    queryKey: ['savings-goals', 'progress'] as const,
+    queryFn: () => api.get<import('./types').GoalProgressSummary>('/savings-goals/progress'),
+  });
+}
+
+export function useGoalContributions(goalId: string | null) {
+  return useQuery({
+    queryKey: ['savings-goals', 'contributions', goalId] as const,
+    queryFn: () => api.get<{ contributions: import('./types').GoalContribution[] }>(`/savings-goals/${goalId}/contributions`).then((r) => r.contributions),
+    enabled: !!goalId,
+  });
+}
+
+export function useGoalAllocations(month: string) {
+  return useQuery({
+    queryKey: ['savings-goals', 'allocations', month] as const,
+    queryFn: () => api.get<import('./types').GoalAllocationsPreview>(`/savings-goals/allocations?month=${month}`),
+  });
+}
+
+export function useCreateSavingsGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      bucketId?: string | null; name: string; description?: string; links?: string;
+      targetAmount: number; currency?: string; deadline?: string | null;
+      savingsPercent?: number; icon?: string;
+    }) => api.post<{ goal: import('./types').SavingsGoal }>('/savings-goals', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useUpdateSavingsGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
+      api.put<{ goal: import('./types').SavingsGoal }>(`/savings-goals/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useDeleteSavingsGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/savings-goals/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useCompleteSavingsGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/savings-goals/${id}/complete`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useCreateSavingsGoalBucket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; color?: string }) =>
+      api.post<{ bucket: import('./types').SavingsGoalBucket }>('/savings-goals/buckets', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useUpdateSavingsGoalBucket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name?: string; color?: string }) =>
+      api.put<{ bucket: import('./types').SavingsGoalBucket }>(`/savings-goals/buckets/${id}`, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useDeleteSavingsGoalBucket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/savings-goals/buckets/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useOverrideContribution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, month, amount, notes }: { goalId: string; month: string; amount: number; notes?: string }) =>
+      api.put(`/savings-goals/${goalId}/contributions/${month}`, { amount, notes }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useRecordAllocations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { month?: string }) =>
+      api.post('/savings-goals/allocations', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}
+
+export function useReorderSavingsGoals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: { id: string; sortOrder: number; type: 'goal' | 'bucket' }[]) =>
+      api.put('/savings-goals/reorder', { items }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['savings-goals'] }); },
+  });
+}

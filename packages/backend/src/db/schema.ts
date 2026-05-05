@@ -319,6 +319,46 @@ export const fireSimulations = pgTable('fire_simulations', {
   createdAt: timestamp('created_at').notNull(),
 });
 
+// ── Savings Goals ─────────────────────────────────────────────────
+
+export const savingsGoalBuckets = pgTable('savings_goal_buckets', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  color: text('color'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at').notNull(),
+});
+
+export const savingsGoals = pgTable('savings_goals', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bucketId: text('bucket_id').references(() => savingsGoalBuckets.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  links: text('links'), // JSON string: [{ label, url }]
+  targetAmount: doublePrecision('target_amount').notNull(),
+  currency: text('currency').notNull().default('INR'),
+  deadline: text('deadline'), // YYYY-MM-DD, nullable for open-ended
+  savingsPercent: doublePrecision('savings_percent').notNull().default(0),
+  icon: text('icon'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isActive: boolean('is_active').notNull().default(true),
+  isCompleted: boolean('is_completed').notNull().default(false),
+  createdAt: timestamp('created_at').notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+export const savingsGoalContributions = pgTable('savings_goal_contributions', {
+  id: text('id').primaryKey(),
+  goalId: text('goal_id').notNull().references(() => savingsGoals.id, { onDelete: 'cascade' }),
+  entryMonth: text('entry_month').notNull(), // YYYY-MM
+  autoAmount: doublePrecision('auto_amount').notNull().default(0),
+  manualAmount: doublePrecision('manual_amount'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull(),
+});
+
 // Type exports for use in services
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -345,3 +385,6 @@ export type PaymentMethod = typeof paymentMethods.$inferSelect;
 export type CashFlowSpend = typeof cashFlowSpends.$inferSelect;
 export type NetWorthTarget = typeof netWorthTargets.$inferSelect;
 export type FireSimulation = typeof fireSimulations.$inferSelect;
+export type SavingsGoalBucket = typeof savingsGoalBuckets.$inferSelect;
+export type SavingsGoal = typeof savingsGoals.$inferSelect;
+export type SavingsGoalContribution = typeof savingsGoalContributions.$inferSelect;

@@ -52,6 +52,7 @@ import {
   useDeleteCategory,
   useUpsertEntry,
   useUpdateEntry,
+  useDeleteEntry,
   useInitMonth,
   useGoalTargets,
   useGoalProjection,
@@ -69,6 +70,7 @@ import {
   useSyncPreview,
   useSyncToPortfolio,
   usePayCcBill,
+  useGoalAllocations,
 } from '../api/hooks';
 import type {
   CashFlowCategory,
@@ -190,6 +192,7 @@ export default function CashFlow() {
   const { data: syncPreview, refetch: refetchSyncPreview } = useSyncPreview(selectedMonth, showSyncDialog);
   const syncToPortfolio = useSyncToPortfolio();
   const payCcBill = usePayCcBill();
+  const { data: goalAllocations } = useGoalAllocations(selectedMonth);
 
   const hasData = summary && (summary.expenses.length > 0 || summary.income.totalIncome > 0 || summary.spends.length > 0);
   const hasCategories = categories && categories.length > 0;
@@ -474,6 +477,28 @@ export default function CashFlow() {
               variant="negative"
             />
           </div>
+
+          {/* Goals Allocation */}
+          {goalAllocations && goalAllocations.allocations.length > 0 && (
+            <Card padding="sm">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-indigo-400" />
+                  <span className="text-sm font-medium text-surface-300">Goals Allocation</span>
+                </div>
+                <span className="text-xs text-surface-500">{goalAllocations.totalAllocatedPercent}% of savings</span>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {goalAllocations.allocations.map((a) => (
+                  <div key={a.goalId} className="text-xs bg-surface-800 rounded-lg px-2.5 py-1.5">
+                    <span className="text-surface-400">{a.goalName}</span>
+                    <span className="text-surface-100 font-medium ml-1.5">{formatCurrency(a.allocatedAmount, 'INR')}</span>
+                    <span className="text-surface-600 ml-1">({a.savingsPercent}%)</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Add Spend Form */}
           {categories && categories.length > 0 && paymentMethods && paymentMethods.length > 0 && (
@@ -1061,6 +1086,7 @@ function ExpenseTable({
   month: string;
 }) {
   const updateEntry = useUpdateEntry();
+  const deleteEntry = useDeleteEntry();
   const createCategory = useCreateCategory();
   const initMonth = useInitMonth();
   const [editingCell, setEditingCell] = useState<{ id: string; field: 'budget' | 'actual' } | null>(null);
@@ -1097,6 +1123,7 @@ function ExpenseTable({
             <th className="text-right py-2 px-3 text-surface-400 font-medium">Spend</th>
             <th className="text-right py-2 px-3 text-surface-400 font-medium">Overspend</th>
             <th className="text-center py-2 px-3 text-surface-400 font-medium">Tag</th>
+            <th className="w-8" />
           </tr>
         </thead>
         <tbody>
@@ -1168,6 +1195,19 @@ function ExpenseTable({
                   {row.tag === 'need' ? 'Need' : 'Luxury'}
                 </span>
               </td>
+              <td className="py-1 px-1 text-center">
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Remove "${row.categoryName}" from this month?`)) {
+                      deleteEntry.mutate(row.id);
+                    }
+                  }}
+                  className="p-1 rounded text-surface-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Remove from this month"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </td>
             </tr>
           ))}
 
@@ -1215,7 +1255,7 @@ function ExpenseTable({
             </tr>
           ) : (
             <tr>
-              <td colSpan={5} className="py-2 px-3">
+              <td colSpan={6} className="py-2 px-3">
                 <button
                   onClick={() => setShowAddRow(true)}
                   className="flex items-center gap-1 text-xs text-surface-500 hover:text-brand-400 transition-colors"
@@ -1235,12 +1275,14 @@ function ExpenseTable({
               {formatCurrency(totalOverspend, 'INR')}
             </td>
             <td />
+            <td />
           </tr>
           {salary > 0 && (
             <tr className="text-surface-500">
               <td className="py-1 px-3">% Salary</td>
               <td className="py-1 px-3 text-right tabular-nums">{((totalBudget / salary) * 100).toFixed(1)}%</td>
               <td className="py-1 px-3 text-right tabular-nums">{((totalActual / salary) * 100).toFixed(1)}%</td>
+              <td />
               <td />
               <td />
             </tr>

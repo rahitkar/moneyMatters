@@ -210,7 +210,7 @@ export const fireService = {
     const result = await db
       .delete(schema.fireSimulations)
       .where(and(eq(schema.fireSimulations.id, id), eq(schema.fireSimulations.userId, userId)));
-    return (result as any).changes > 0;
+    return (result as any).rowCount > 0;
   },
 
   async getSimulationResult(userId: string, id: string): Promise<FireSimulationResult | null> {
