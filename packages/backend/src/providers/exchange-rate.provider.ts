@@ -1,9 +1,7 @@
-import YahooFinance from 'yahoo-finance2';
 import { todayLocal } from '../lib/date.js';
+import { yahooFinanceProvider } from './yahoo-finance.provider.js';
 
 const EXCHANGE_API = 'https://api.frankfurter.app';
-
-const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 export interface ExchangeRate {
   from: string;
@@ -15,16 +13,24 @@ export interface ExchangeRate {
 
 const rateCache = new Map<string, { rate: ExchangeRate; ts: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+// Short-lived "negative cache" — when both Yahoo and Frankfurter fail to
+// answer for a currency pair, remember that for ~60s. This stops a tight
+// loop of consumers (e.g. portfolio recompute over many holdings) from
+// hammering both upstreams during an outage.
+const negativeCache = new Map<string, number>();
+const NEGATIVE_TTL_MS = 60_000;
+
 const inflight = new Map<string, Promise<ExchangeRate | null>>();
 
 async function yahooFxRate(from: string, to: string): Promise<number | null> {
+  // Route through the throttled provider so FX calls share the same crumb
+  // budget, exponential backoff, and chart-endpoint fallback as equity
+  // quotes. Previously this used a raw `yf.quote()` which bypassed all of
+  // that and 429'd into the void.
   const symbol = `${from.toUpperCase()}${to.toUpperCase()}=X`;
-  try {
-    const quote = await yf.quote(symbol);
-    return quote?.regularMarketPrice ?? null;
-  } catch {
-    return null;
-  }
+  const quote = await yahooFinanceProvider.getQuote(symbol);
+  return quote?.price ?? null;
 }
 
 async function frankfurterRate(from: string, to: string): Promise<number | null> {
@@ -35,7 +41,11 @@ async function frankfurterRate(from: string, to: string): Promise<number | null>
     if (!res.ok) return null;
     const data = await res.json();
     return data.rates?.[to.toUpperCase()] ?? null;
-  } catch {
+  } catch (err) {
+    console.warn(
+      `Frankfurter FX error for ${from}->${to}:`,
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
 }
@@ -45,6 +55,11 @@ export const exchangeRateProvider = {
     const key = `${from.toUpperCase()}_${to.toUpperCase()}`;
     const cached = rateCache.get(key);
     if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.rate;
+
+    // Negative cache: if both upstreams just failed for this pair, don't
+    // retry until the short TTL elapses.
+    const negTs = negativeCache.get(key);
+    if (negTs != null && Date.now() - negTs < NEGATIVE_TTL_MS) return null;
 
     if (inflight.has(key)) return inflight.get(key)!;
 
@@ -62,10 +77,18 @@ export const exchangeRateProvider = {
 
     let rate = await yahooFxRate(from, to);
     if (rate == null) {
-      console.warn(`Yahoo FX unavailable for ${key}, falling back to frankfurter`);
+      // Yahoo failed (rate-limited, blocked, or upstream down). Frankfurter
+      // is a free ECB-backed FX API with no auth or quota — a good fallback.
       rate = await frankfurterRate(from, to);
     }
-    if (rate == null) return null;
+    if (rate == null) {
+      console.warn(`FX unavailable for ${key} from both Yahoo and Frankfurter; caching negative for ${NEGATIVE_TTL_MS / 1000}s`);
+      negativeCache.set(key, Date.now());
+      return null;
+    }
+
+    // Successful fetch invalidates any prior negative cache entry.
+    negativeCache.delete(key);
 
     const result: ExchangeRate = {
       from: from.toUpperCase(),
