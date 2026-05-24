@@ -17,6 +17,9 @@ import {
   Landmark,
   Pencil,
   Check,
+  Flame,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   BarChart,
@@ -71,6 +74,8 @@ import {
   useSyncToPortfolio,
   usePayCcBill,
   useGoalAllocations,
+  useFireMonthlyTargets,
+  useFireWhatIf,
 } from '../api/hooks';
 import type {
   CashFlowCategory,
@@ -167,6 +172,7 @@ export default function CashFlow() {
   const { data: yearly } = useCashFlowYearly(fyYear);
   const { data: targets } = useGoalTargets();
   const { data: paymentMethods } = usePaymentMethods();
+  const { data: fireMonthlyTargets } = useFireMonthlyTargets(parseInt(fyYear, 10));
   const { data: allPositions } = usePositions();
   const { data: usdInrRate } = useExchangeRate('USD', 'INR');
   const usdToInr = usdInrRate?.rate ?? null;
@@ -183,6 +189,7 @@ export default function CashFlow() {
   const [openingBalanceInput, setOpeningBalanceInput] = useState('');
   const [expenseLimitInput, setExpenseLimitInput] = useState('');
   const [investmentTargetInput, setInvestmentTargetInput] = useState('');
+  const [savingsTargetInput, setSavingsTargetInput] = useState('');
 
   const upsertConfig = useUpsertMonthConfig();
   const initMonth = useInitMonth();
@@ -193,6 +200,9 @@ export default function CashFlow() {
   const syncToPortfolio = useSyncToPortfolio();
   const payCcBill = usePayCcBill();
   const { data: goalAllocations } = useGoalAllocations(selectedMonth);
+  const fireWhatIf = useFireWhatIf();
+  const [whatIfOpen, setWhatIfOpen] = useState(false);
+  const [whatIfSavings, setWhatIfSavings] = useState('');
 
   const hasData = summary && (summary.expenses.length > 0 || summary.income.totalIncome > 0 || summary.spends.length > 0);
   const hasCategories = categories && categories.length > 0;
@@ -304,6 +314,7 @@ export default function CashFlow() {
                   openingBalance: openingBalanceInput ? parseFloat(openingBalanceInput) : undefined,
                   expenseLimit: expenseLimitInput ? parseFloat(expenseLimitInput) : undefined,
                   investmentTarget: investmentTargetInput ? parseFloat(investmentTargetInput) : undefined,
+                  savingsTarget: savingsTargetInput ? parseFloat(savingsTargetInput) : undefined,
                 });
                 setEditingConfig(false);
               }}
@@ -324,6 +335,11 @@ export default function CashFlow() {
                   <input type="number" value={investmentTargetInput} onChange={(e) => setInvestmentTargetInput(e.target.value)} placeholder="Min investment"
                     className="w-32 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500" />
                 </div>
+                <div>
+                  <label className="block text-[10px] text-surface-500 mb-0.5">Savings Target</label>
+                  <input type="number" value={savingsTargetInput} onChange={(e) => setSavingsTargetInput(e.target.value)} placeholder="Min savings"
+                    className="w-32 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500" />
+                </div>
                 <div className="flex items-end gap-1 pt-4">
                   <button type="submit" className="btn btn-primary text-xs px-3 py-1.5">Save</button>
                   <button type="button" onClick={() => setEditingConfig(false)} className="text-surface-500 hover:text-surface-300">
@@ -339,6 +355,7 @@ export default function CashFlow() {
                   setOpeningBalanceInput(summary?.income.openingBalanceAutoCarried ? '' : String(summary?.income.openingBalance ?? ''));
                   setExpenseLimitInput(String(summary?.income.expenseLimit ?? ''));
                   setInvestmentTargetInput(String(summary?.income.investmentTarget ?? ''));
+                  setSavingsTargetInput(String(summary?.income.savingsTarget ?? ''));
                   setEditingConfig(true);
                 }}
                 className="text-surface-100 font-semibold hover:text-brand-400 transition-colors flex items-center gap-2"
@@ -487,6 +504,130 @@ export default function CashFlow() {
               variant="negative"
             />
           </div>
+
+          {/* FIRE Status Indicators */}
+          {fireMonthlyTargets && fireMonthlyTargets.scenarios.length > 0 && summary.totals.totalIncome > 0 && (
+            <Card padding="sm">
+              <div className="flex items-center gap-2 mb-2">
+                <Flame className="w-4 h-4 text-orange-400" />
+                <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">FIRE Savings Targets</span>
+                {summary.income.savingsTargetSource === 'fire' && (
+                  <span className="text-[10px] text-surface-600">(derived from FIRE)</span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {fireMonthlyTargets.scenarios.map((scen, idx) => {
+                  const monthData = fireMonthlyTargets.months.find((fm) => fm.month === selectedMonth);
+                  const target = monthData?.investmentTargets[scen.id] ?? 0;
+                  const actualSavings = summary.totals.totalIncome - summary.totals.totalExpenses;
+                  const diff = actualSavings - target;
+                  const isAhead = diff >= 0;
+                  return (
+                    <div
+                      key={scen.id}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700/50"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
+                      />
+                      <span className="text-xs text-surface-300">{scen.name}:</span>
+                      <span className={clsx('text-xs font-medium', isAhead ? 'text-green-400' : 'text-red-400')}>
+                        {isAhead ? `+${formatCurrency(diff, 'INR')} ahead` : `${formatCurrency(Math.abs(diff), 'INR')} behind`}
+                      </span>
+                      <span className="text-[10px] text-surface-600">
+                        (target: {formatCurrency(target, 'INR')})
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* FIRE What-If Panel */}
+          {fireMonthlyTargets && fireMonthlyTargets.scenarios.length > 0 && (
+            <Card padding="sm">
+              <button
+                onClick={() => setWhatIfOpen(!whatIfOpen)}
+                className="flex items-center gap-2 w-full text-left"
+              >
+                {whatIfOpen ? <ChevronDown className="w-4 h-4 text-surface-400" /> : <ChevronRight className="w-4 h-4 text-surface-400" />}
+                <Flame className="w-4 h-4 text-orange-400" />
+                <span className="text-sm font-medium text-surface-200">What-If: FIRE Impact</span>
+                <span className="text-[10px] text-surface-600 ml-1">What if I save more/less this month?</span>
+              </button>
+              {whatIfOpen && (
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-end gap-3">
+                    <div>
+                      <label className="block text-[10px] text-surface-500 mb-0.5">Monthly Savings (₹)</label>
+                      <input
+                        type="number"
+                        value={whatIfSavings}
+                        onChange={(e) => setWhatIfSavings(e.target.value)}
+                        placeholder={String(summary?.totals.totalIncome ? summary.totals.totalIncome - summary.totals.totalExpenses : 0)}
+                        className="w-40 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500 tabular-nums"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        const val = parseFloat(whatIfSavings);
+                        if (!isNaN(val) && val >= 0) fireWhatIf.mutate(val);
+                      }}
+                      disabled={fireWhatIf.isPending || !whatIfSavings}
+                      className="btn btn-primary text-sm py-1.5"
+                    >
+                      {fireWhatIf.isPending ? 'Calculating...' : 'Simulate'}
+                    </button>
+                    {summary && (
+                      <span className="text-[10px] text-surface-600">
+                        Current: {formatCurrency(summary.totals.totalIncome - summary.totals.totalExpenses, 'INR')}/mo
+                      </span>
+                    )}
+                  </div>
+                  {fireWhatIf.data && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {fireWhatIf.data.scenarios.map((scen, idx) => (
+                        <div
+                          key={scen.id}
+                          className="p-3 rounded-xl bg-surface-800/50 border border-surface-700/50"
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
+                            />
+                            <span className="text-sm font-medium text-surface-200">{scen.name}</span>
+                          </div>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-surface-500">Corpus at Retirement</span>
+                              <span className={clsx('font-mono font-medium', scen.delta.corpusDelta >= 0 ? 'text-green-400' : 'text-red-400')}>
+                                {scen.delta.corpusDelta >= 0 ? '+' : ''}{formatCurrency(scen.delta.corpusDelta, 'INR')}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-surface-500">Original Corpus</span>
+                              <span className="text-surface-300 font-mono">{formatCurrency(scen.original.corpusAtRetirement, 'INR')}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-surface-500">Adjusted Corpus</span>
+                              <span className="text-surface-100 font-mono font-medium">{formatCurrency(scen.adjusted.corpusAtRetirement, 'INR')}</span>
+                            </div>
+                            <div className="flex justify-between pt-1 border-t border-surface-700/50">
+                              <span className="text-surface-500">Original Saving</span>
+                              <span className="text-surface-400 font-mono">{formatCurrency(scen.original.monthlySaving, 'INR')}/mo</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Goals Allocation — Earmarked Money */}
           {goalAllocations && goalAllocations.allocations.length > 0 && (
@@ -709,15 +850,27 @@ export default function CashFlow() {
             <h2 className="text-lg font-semibold text-surface-100 mb-4">Income, Expenses & Investment Trend</h2>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={yearly.months.map((m) => ({
-                  month: shortMonthLabel(m.month),
-                  income: m.totals.totalIncome,
-                  expenses: m.totals.totalExpenses,
-                  investment: m.totals.totalInvested,
-                  savings: m.waterfall.savings,
-                  expenseLimit: m.income.expenseLimit ?? undefined,
-                  investmentTarget: m.income.investmentTarget ?? undefined,
-                }))}>
+                <ComposedChart data={yearly.months.map((m) => {
+                  const point: Record<string, any> = {
+                    month: shortMonthLabel(m.month),
+                    income: m.totals.totalIncome,
+                    expenses: m.totals.totalExpenses,
+                    investment: m.totals.totalInvested,
+                    savings: m.totals.totalIncome - m.totals.totalExpenses,
+                  };
+                  if (fireMonthlyTargets) {
+                    for (const scen of fireMonthlyTargets.scenarios) {
+                      const monthData = fireMonthlyTargets.months.find((fm) => fm.month === m.month);
+                      if (monthData) {
+                        point[`fire_${scen.id}`] = monthData.investmentTargets[scen.id] ?? undefined;
+                      }
+                    }
+                  }
+                  if (!fireMonthlyTargets && m.income.savingsTarget != null) {
+                    point.savingsTarget = m.income.savingsTarget;
+                  }
+                  return point;
+                })}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                   <XAxis dataKey="month" stroke="#71717a" fontSize={12} />
                   <YAxis stroke="#71717a" fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
@@ -725,19 +878,42 @@ export default function CashFlow() {
                     contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
                     labelStyle={{ color: '#a1a1aa' }}
                     formatter={(value: number, name: string) => {
-                      const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', expenseLimit: 'Expense Limit', investmentTarget: 'Inv. Target' };
+                      if (name.startsWith('fire_') && fireMonthlyTargets) {
+                        const scenId = name.replace('fire_', '');
+                        const scen = fireMonthlyTargets.scenarios.find((s) => s.id === scenId);
+                        return [formatCurrency(value, 'INR'), scen?.name ?? 'FIRE Target'];
+                      }
+                      const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', savingsTarget: 'Savings Target' };
                       return [formatCurrency(value, 'INR'), labels[name] ?? name];
                     }}
                   />
                   <Legend formatter={(v) => {
-                    const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', expenseLimit: 'Expense Limit', investmentTarget: 'Inv. Target' };
+                    if (v.startsWith('fire_') && fireMonthlyTargets) {
+                      const scenId = v.replace('fire_', '');
+                      return fireMonthlyTargets.scenarios.find((s) => s.id === scenId)?.name ?? 'FIRE Target';
+                    }
+                    const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', savingsTarget: 'Savings Target' };
                     return labels[v] ?? v;
                   }} />
-                  <Bar dataKey="income" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="income" fill="#6366f1" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="expenses" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="investment" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="expenseLimit" stroke="#eab308" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                  <Line type="monotone" dataKey="investmentTarget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                  <Bar dataKey="investment" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="savings" fill="#a78bfa" radius={[4, 4, 0, 0]} />
+                  {fireMonthlyTargets && fireMonthlyTargets.scenarios.map((scen, idx) => (
+                    <Line
+                      key={scen.id}
+                      type="monotone"
+                      dataKey={`fire_${scen.id}`}
+                      stroke={FIRE_COLORS[idx % FIRE_COLORS.length]}
+                      strokeWidth={2.5}
+                      strokeDasharray="6 3"
+                      dot={false}
+                      connectNulls
+                    />
+                  ))}
+                  {!fireMonthlyTargets && (
+                    <Line type="monotone" dataKey="savingsTarget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

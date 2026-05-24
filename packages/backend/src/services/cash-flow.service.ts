@@ -13,6 +13,7 @@ import type {
 } from '../db/schema.js';
 import { getCycleMonth, getCycleDateRange, getCycleStartDay } from './cycle.utils.js';
 import { transactionService } from './transaction.service.js';
+import { fireService } from './fire.service.js';
 
 // ── Category CRUD ─────────────────────────────────────────────────
 
@@ -768,6 +769,30 @@ export const cashFlowService = {
       .reduce((sum, s) => sum + s.amount, 0);
     const cashUpiExpenses = totalExpenses - ccBillTotal;
 
+    // Derive savings target from FIRE if not manually set
+    let savingsTarget = income?.savingsTarget ?? null;
+    let savingsTargetSource: 'manual' | 'fire' | null = savingsTarget !== null ? 'manual' : null;
+    let fireScenarioTargets: { id: string; name: string; monthlySaving: number }[] = [];
+
+    if (savingsTarget === null) {
+      try {
+        const [y, m] = month.split('-').map(Number);
+        const fy = m >= 4 ? y : y - 1;
+        const fireTargets = await fireService.getMonthlyTargets(userId, fy);
+        if (fireTargets.scenarios.length > 0) {
+          fireScenarioTargets = fireTargets.scenarios;
+          const monthData = fireTargets.months.find((fm) => fm.month === month);
+          if (monthData && fireTargets.scenarios[0]) {
+            const baseTarget = monthData.investmentTargets[fireTargets.scenarios[0].id];
+            if (baseTarget && baseTarget > 0) {
+              savingsTarget = baseTarget;
+              savingsTargetSource = 'fire';
+            }
+          }
+        }
+      } catch {}
+    }
+
     return {
       month,
       cycleStartDay: cycleDay,
@@ -781,7 +806,9 @@ export const cashFlowService = {
         openingBalanceAutoCarried: !openingBalanceExplicit && openingBalance !== null,
         expenseLimit: income?.expenseLimit ?? null,
         investmentTarget: income?.investmentTarget ?? null,
-        savingsTarget: income?.savingsTarget ?? null,
+        savingsTarget,
+        savingsTargetSource,
+        fireScenarioTargets,
       },
       expenses: expenseRows,
       investments,

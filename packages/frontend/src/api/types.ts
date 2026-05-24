@@ -382,6 +382,8 @@ export interface CashFlowMonthSummary {
     expenseLimit: number | null;
     investmentTarget: number | null;
     savingsTarget: number | null;
+    savingsTargetSource: 'manual' | 'fire' | null;
+    fireScenarioTargets: { id: string; name: string; monthlySaving: number }[];
   };
   expenses: ExpenseRow[];
   investments: InvestmentRow[];
@@ -543,6 +545,18 @@ export interface FireMonthlyTargetData {
   fyLabel: string;
   scenarios: { id: string; name: string; monthlySaving: number }[];
   months: FireMonthlyTargetMonth[];
+}
+
+export interface FireWhatIfScenario {
+  id: string;
+  name: string;
+  original: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
+  adjusted: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
+  delta: { retirementAgeShift: number; corpusDelta: number };
+}
+
+export interface FireWhatIfResult {
+  scenarios: FireWhatIfScenario[];
 }
 
 // ── Savings Goals ──────────────────────────────────────────────────

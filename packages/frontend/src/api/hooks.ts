@@ -992,6 +992,13 @@ export function useFirePreview() {
   });
 }
 
+export function useFireWhatIf() {
+  return useMutation({
+    mutationFn: (monthlySaving: number) =>
+      api.post<{ data: import('./types').FireWhatIfResult }>('/fire/what-if', { monthlySaving }).then((r) => r.data),
+  });
+}
+
 export function useCreateFireSimulation() {
   const qc = useQueryClient();
   return useMutation({

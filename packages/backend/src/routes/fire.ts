@@ -111,4 +111,17 @@ export async function fireRoutes(fastify: FastifyInstance) {
       return { result };
     },
   );
+
+  // What-if: re-run all scenarios with an adjusted monthlySaving and return impact
+  fastify.post<{ Body: { monthlySaving: number } }>(
+    '/what-if',
+    async (request, reply) => {
+      const { monthlySaving } = request.body;
+      if (typeof monthlySaving !== 'number' || monthlySaving < 0) {
+        return reply.status(400).send({ error: 'monthlySaving must be a non-negative number' });
+      }
+      const data = await fireService.whatIf(request.userId, monthlySaving);
+      return { data };
+    },
+  );
 }

@@ -523,4 +523,43 @@ export const fireService = {
 
     return { simulations, actualPortfolio, liveValue: Math.round(liveValue), liveProgress };
   },
+
+  async whatIf(userId: string, adjustedMonthlySaving: number): Promise<{
+    scenarios: {
+      id: string;
+      name: string;
+      original: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
+      adjusted: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
+      delta: { retirementAgeShift: number; corpusDelta: number };
+    }[];
+  }> {
+    const all = await this.getAll(userId);
+    const scenarios = all.map((sim) => {
+      const originalResult = runSimulation(sim);
+
+      const adjustedSim = { ...sim, monthlySaving: adjustedMonthlySaving };
+      const adjustedResult = runSimulation(adjustedSim);
+
+      return {
+        id: sim.id,
+        name: sim.name,
+        original: {
+          retirementAge: sim.retirementAge,
+          corpusAtRetirement: originalResult.corpusAtRetirement,
+          monthlySaving: sim.monthlySaving,
+        },
+        adjusted: {
+          retirementAge: sim.retirementAge,
+          corpusAtRetirement: adjustedResult.corpusAtRetirement,
+          monthlySaving: adjustedMonthlySaving,
+        },
+        delta: {
+          retirementAgeShift: 0,
+          corpusDelta: adjustedResult.corpusAtRetirement - originalResult.corpusAtRetirement,
+        },
+      };
+    });
+
+    return { scenarios };
+  },
 };
