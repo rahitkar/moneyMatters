@@ -1,6 +1,10 @@
 import { todayLocal } from '../lib/date.js';
-import { yahooFinanceProvider } from './yahoo-finance.provider.js';
 
+// Frankfurter is a free, ECB-backed FX API: no auth, no rate limits, no
+// crumb dance. Its rates differ from Yahoo's by <0.1% on majors and it
+// doesn't share Yahoo's IP-reputation issues that Render's outbound NAT
+// runs into. We use it as the single FX source — Yahoo's `=X` symbols
+// are not worth the rate-limit cost they impose on actual equity quotes.
 const EXCHANGE_API = 'https://api.frankfurter.app';
 
 export interface ExchangeRate {
@@ -14,31 +18,25 @@ export interface ExchangeRate {
 const rateCache = new Map<string, { rate: ExchangeRate; ts: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
-// Short-lived "negative cache" — when both Yahoo and Frankfurter fail to
-// answer for a currency pair, remember that for ~60s. This stops a tight
-// loop of consumers (e.g. portfolio recompute over many holdings) from
-// hammering both upstreams during an outage.
+// Short-lived "negative cache" — when Frankfurter fails (network hiccup,
+// brief outage) remember that for ~60s. This stops a tight loop of
+// consumers (e.g. portfolio recompute over many holdings) from hammering
+// the API during an outage.
 const negativeCache = new Map<string, number>();
 const NEGATIVE_TTL_MS = 60_000;
 
 const inflight = new Map<string, Promise<ExchangeRate | null>>();
 
-async function yahooFxRate(from: string, to: string): Promise<number | null> {
-  // Route through the throttled provider so FX calls share the same crumb
-  // budget, exponential backoff, and chart-endpoint fallback as equity
-  // quotes. Previously this used a raw `yf.quote()` which bypassed all of
-  // that and 429'd into the void.
-  const symbol = `${from.toUpperCase()}${to.toUpperCase()}=X`;
-  const quote = await yahooFinanceProvider.getQuote(symbol);
-  return quote?.price ?? null;
-}
-
 async function frankfurterRate(from: string, to: string): Promise<number | null> {
   try {
     const res = await fetch(
-      `${EXCHANGE_API}/latest?from=${from.toUpperCase()}&to=${to.toUpperCase()}`
+      `${EXCHANGE_API}/latest?from=${from.toUpperCase()}&to=${to.toUpperCase()}`,
+      { signal: AbortSignal.timeout(5000) },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`Frankfurter FX HTTP ${res.status} for ${from}->${to}`);
+      return null;
+    }
     const data = await res.json();
     return data.rates?.[to.toUpperCase()] ?? null;
   } catch (err) {
@@ -75,14 +73,9 @@ export const exchangeRateProvider = {
   async _fetchRate(from: string, to: string, key: string): Promise<ExchangeRate | null> {
     const today = todayLocal();
 
-    let rate = await yahooFxRate(from, to);
+    const rate = await frankfurterRate(from, to);
     if (rate == null) {
-      // Yahoo failed (rate-limited, blocked, or upstream down). Frankfurter
-      // is a free ECB-backed FX API with no auth or quota — a good fallback.
-      rate = await frankfurterRate(from, to);
-    }
-    if (rate == null) {
-      console.warn(`FX unavailable for ${key} from both Yahoo and Frankfurter; caching negative for ${NEGATIVE_TTL_MS / 1000}s`);
+      console.warn(`FX unavailable for ${key} from Frankfurter; caching negative for ${NEGATIVE_TTL_MS / 1000}s`);
       negativeCache.set(key, Date.now());
       return null;
     }

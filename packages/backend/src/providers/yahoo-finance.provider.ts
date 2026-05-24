@@ -26,8 +26,16 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // recover. Yahoo's crumb endpoint is the most rate-limit-sensitive, so once we
 // see a 429 we slow everything down rather than getting cascading failures.
 const BASE_REQUEST_INTERVAL_MS = 600;
-const MAX_REQUEST_INTERVAL_MS = 8_000;
-const RATE_LIMIT_COOLDOWN_MS = 30_000;
+const MAX_REQUEST_INTERVAL_MS = 4_000;
+const RATE_LIMIT_COOLDOWN_MS = 15_000;
+
+// "Chart-first mode": once we've seen a crumb 429 in this process lifetime,
+// flip a sticky flag. The /v8 chart endpoint doesn't need a crumb, so for
+// the rest of the lifetime we go chart-first and fall back to /v7 only if
+// chart fails. This dramatically reduces 429s in long-lived processes
+// (e.g. Render web services) where Yahoo has decided our IP is hot.
+// Reset on any successful /v7 quote, in case Yahoo cools off.
+let preferChartFirst = false;
 
 let lastRequestTime = 0;
 let currentInterval = BASE_REQUEST_INTERVAL_MS;
@@ -60,17 +68,23 @@ async function throttle(): Promise<void> {
   lastRequestTime = Date.now();
 }
 
-function noteRateLimited(): void {
+function noteRateLimited(viaCrumb = false): void {
   // Double the inter-request interval (capped) and force a cooldown window.
   currentInterval = Math.min(MAX_REQUEST_INTERVAL_MS, Math.max(currentInterval, BASE_REQUEST_INTERVAL_MS) * 2);
   cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  // A crumb-endpoint 429 is the strongest signal that we should stop
+  // hitting /v7 and use /v8 chart for the rest of this process lifetime.
+  if (viaCrumb) preferChartFirst = true;
 }
 
-function noteSuccess(): void {
+function noteSuccess(viaQuoteEndpoint = false): void {
   // Decay the interval back toward baseline on each success.
   if (currentInterval > BASE_REQUEST_INTERVAL_MS) {
     currentInterval = Math.max(BASE_REQUEST_INTERVAL_MS, Math.floor(currentInterval * 0.75));
   }
+  // If a /v7 quote actually succeeded, Yahoo is friendly again — turn off
+  // the sticky chart-first flag so we can use the richer /v7 payload.
+  if (viaQuoteEndpoint) preferChartFirst = false;
 }
 
 // Some symbols are obviously not Yahoo tickers (full fund names, raw ISINs).
@@ -126,64 +140,103 @@ async function quoteViaChart(symbol: string): Promise<QuoteResult | null> {
   };
 }
 
+async function quoteViaQuoteEndpoint(symbol: string): Promise<QuoteResult | null> {
+  const quote = await yf.quote(symbol);
+  if (!quote) return null;
+  return {
+    symbol: quote.symbol,
+    name: quote.shortName || quote.longName || symbol,
+    price: quote.regularMarketPrice || 0,
+    previousClose: quote.regularMarketPreviousClose ?? undefined,
+    currency: quote.currency || 'USD',
+    change: quote.regularMarketChange || 0,
+    changePercent: quote.regularMarketChangePercent || 0,
+    marketCap: quote.marketCap,
+    volume: quote.regularMarketVolume,
+    regularMarketTime: quote.regularMarketTime,
+  };
+}
+
 export const yahooFinanceProvider = {
   async getQuote(symbol: string): Promise<QuoteResult | null> {
     if (isLikelyInvalidSymbol(symbol)) return null;
 
-    // Try the regular /v7 quote endpoint first. On 429/crumb failure, fall back
-    // to /v8 chart (no crumb needed) and let the caller continue.
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Order of preference:
+    //   - Default: /v7 quote first (richer payload), /v8 chart on 429.
+    //   - After we've seen a crumb 429 this process: /v8 chart first
+    //     (no crumb needed, way more tolerant), /v7 only if chart fails.
+    const tryQuote = async (): Promise<QuoteResult | null> => {
       await throttle();
       try {
-        const quote = await yf.quote(symbol);
-        if (!quote) return null;
-        noteSuccess();
-        return {
-          symbol: quote.symbol,
-          name: quote.shortName || quote.longName || symbol,
-          price: quote.regularMarketPrice || 0,
-          previousClose: quote.regularMarketPreviousClose ?? undefined,
-          currency: quote.currency || 'USD',
-          change: quote.regularMarketChange || 0,
-          changePercent: quote.regularMarketChangePercent || 0,
-          marketCap: quote.marketCap,
-          volume: quote.regularMarketVolume,
-          regularMarketTime: quote.regularMarketTime,
-        };
+        const result = await quoteViaQuoteEndpoint(symbol);
+        if (result) noteSuccess(true);
+        return result;
       } catch (error) {
         if (isNotFoundError(error)) return null;
-
         if (isRateLimitError(error)) {
-          noteRateLimited();
-          // Try the chart fallback once before retrying the quote endpoint.
-          try {
-            const fallback = await quoteViaChart(symbol);
-            if (fallback) {
-              noteSuccess();
-              return fallback;
-            }
-          } catch (chartErr) {
-            if (isRateLimitError(chartErr)) noteRateLimited();
-            // fall through to next attempt
-          }
-          // If we still have a retry budget, loop and try /v7 again after cooldown.
-          if (attempt === 0) continue;
+          noteRateLimited(/* viaCrumb */ true);
         }
-
-        console.error(`Yahoo Finance quote error for ${symbol}:`, error);
-        return null;
+        throw error;
       }
+    };
+
+    const tryChart = async (): Promise<QuoteResult | null> => {
+      await throttle();
+      try {
+        const result = await quoteViaChart(symbol);
+        if (result) noteSuccess();
+        return result;
+      } catch (error) {
+        if (isNotFoundError(error)) return null;
+        if (isRateLimitError(error)) noteRateLimited();
+        throw error;
+      }
+    };
+
+    const order = preferChartFirst ? [tryChart, tryQuote] : [tryQuote, tryChart];
+    let lastError: unknown = null;
+
+    for (const fn of order) {
+      try {
+        const result = await fn();
+        if (result) return result;
+      } catch (error) {
+        lastError = error;
+        // Keep going to the next strategy. If both fail, we'll log once below.
+      }
+    }
+
+    if (lastError && !isNotFoundError(lastError) && !isRateLimitError(lastError)) {
+      console.error(`Yahoo Finance quote error for ${symbol}:`, lastError);
+    } else if (isRateLimitError(lastError)) {
+      // Both endpoints rate-limited. Log once with low noise so a long
+      // refresh during a Yahoo squeeze doesn't spam the same stack 50x.
+      console.warn(`Yahoo rate-limited on both /v7 and /v8 for ${symbol}; skipping`);
     }
     return null;
   },
 
   async getQuotes(symbols: string[]): Promise<Map<string, QuoteResult>> {
     const results = new Map<string, QuoteResult>();
+    const total = symbols.length;
+    // Periodic progress so a long refresh doesn't look hung. Every 25
+    // symbols (or whenever the throttle has visibly stretched) we log a
+    // heartbeat. Use console.log so it shows up alongside Pino lines.
+    const PROGRESS_EVERY = 25;
+    let done = 0;
+    let lastLoggedAt = 0;
 
     for (const symbol of symbols) {
       const quote = await this.getQuote(symbol);
-      if (quote) {
-        results.set(symbol, quote);
+      if (quote) results.set(symbol, quote);
+      done++;
+      if (done % PROGRESS_EVERY === 0 || done === total) {
+        const now = Date.now();
+        // Avoid double-logging when symbols evaporate quickly from cache hits.
+        if (now - lastLoggedAt > 1000 || done === total) {
+          console.log(`Yahoo quotes progress: ${done}/${total} (interval=${currentInterval}ms${preferChartFirst ? ', chart-first' : ''})`);
+          lastLoggedAt = now;
+        }
       }
     }
 
