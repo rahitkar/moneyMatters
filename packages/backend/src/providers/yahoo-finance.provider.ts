@@ -41,7 +41,10 @@ let lastRequestTime = 0;
 let currentInterval = BASE_REQUEST_INTERVAL_MS;
 let cooldownUntil = 0;
 
-const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+// `ripHistorical`: yahoo-finance2 v3 deprecated historical() in favour of
+// chart(). We've migrated `getHistoricalPrices` below to use chart()
+// directly, but the suppression also covers any indirect transitive uses.
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
 function isRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -269,38 +272,31 @@ export const yahooFinanceProvider = {
     period2: Date
   ): Promise<{ date: Date; close: number }[]> {
     if (isLikelyInvalidSymbol(symbol)) return [];
+
+    // Use /v8 chart directly (instead of the deprecated historical() which
+    // yahoo-finance2 internally maps to chart() anyway). Chart doesn't
+    // require a crumb, so historical pulls don't burn our crumb budget.
+    // `validateResult: false` lets through rows with null OHLC values
+    // (common for non-trading days or split-adjusted gaps); we filter
+    // those out below.
     try {
       await throttle();
-      const result = await yf.historical(symbol, {
-        period1,
-        period2,
-        interval: '1d',
-      });
+      const result = await yf.chart(
+        symbol,
+        { period1, period2, interval: '1d' },
+        { validateResult: false },
+      );
       noteSuccess();
-      return result
-        .filter((r) => r.close != null)
-        .map((r) => ({
-          date: r.date,
-          close: r.close!,
-        }));
-    } catch (error: unknown) {
-      if (isRateLimitError(error)) noteRateLimited();
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('null values')) {
-        try {
-          await throttle();
-          const result: Array<{ date: Date; close: number | null }> = await yf.historical(
-            symbol,
-            { period1, period2, interval: '1d' },
-            { validateResult: false }
-          );
-          noteSuccess();
-          return result
-            .filter((r) => r.close != null && r.close > 0)
-            .map((r) => ({ date: r.date, close: r.close as number }));
-        } catch (retryErr) {
-          if (isRateLimitError(retryErr)) noteRateLimited();
-        }
+      const quotes = (result as { quotes?: Array<{ date: Date; close: number | null }> } | undefined)?.quotes ?? [];
+      return quotes
+        .filter((r) => r.close != null && r.close > 0)
+        .map((r) => ({ date: r.date, close: r.close as number }));
+    } catch (error) {
+      if (isNotFoundError(error)) return [];
+      if (isRateLimitError(error)) {
+        noteRateLimited();
+        console.warn(`Yahoo rate-limited on chart for ${symbol}; skipping historical`);
+        return [];
       }
       console.error(`Yahoo Finance historical error for ${symbol}:`, error);
       return [];
