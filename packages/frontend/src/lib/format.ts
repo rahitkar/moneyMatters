@@ -54,6 +54,21 @@ export function formatCompactNumber(value: number): string {
   return value.toFixed(2);
 }
 
+/**
+ * Compact Indian-units currency formatter — Cr/L for big values, full
+ * INR formatting for small ones. Used wherever raw INR values would be
+ * too long to fit (status pills, dense tables, chart tooltips). Sign is
+ * preserved.
+ */
+export function formatLakhCrore(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  const inr = '\u20B9';
+  if (abs >= 10_000_000) return `${sign}${inr}${(abs / 10_000_000).toFixed(2)} Cr`;
+  if (abs >= 100_000) return `${sign}${inr}${(abs / 100_000).toFixed(1)} L`;
+  return formatCurrency(value, 'INR');
+}
+
 // Parse ISO date strings (YYYY-MM-DD) as local time to avoid UTC timezone shift
 function parseLocalDate(dateString: string): Date {
   const [y, m, d] = dateString.split('-').map(Number);

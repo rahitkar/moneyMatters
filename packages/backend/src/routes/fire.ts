@@ -112,13 +112,25 @@ export async function fireRoutes(fastify: FastifyInstance) {
     },
   );
 
-  // What-if: re-run all scenarios with an adjusted monthlySaving and return impact
+  // What-if: model a single month's saving and return the impact on each
+  // scenario's corpus and earliest possible retirement age.
+  // Upper bound is set high enough to cover any realistic monthly saving in
+  // INR (₹1 crore/mo ≈ ₹12 cr/yr) while preventing absurd inputs that would
+  // produce Infinity/NaN through the (1+r)^n compounding chain.
+  const WHAT_IF_MAX = 100_00_000;
   fastify.post<{ Body: { monthlySaving: number } }>(
     '/what-if',
     async (request, reply) => {
-      const { monthlySaving } = request.body;
-      if (typeof monthlySaving !== 'number' || monthlySaving < 0) {
-        return reply.status(400).send({ error: 'monthlySaving must be a non-negative number' });
+      const { monthlySaving } = request.body ?? {};
+      if (
+        typeof monthlySaving !== 'number' ||
+        !Number.isFinite(monthlySaving) ||
+        monthlySaving < 0 ||
+        monthlySaving > WHAT_IF_MAX
+      ) {
+        return reply
+          .status(400)
+          .send({ error: `monthlySaving must be a finite number between 0 and ${WHAT_IF_MAX}` });
       }
       const data = await fireService.whatIf(request.userId, monthlySaving);
       return { data };

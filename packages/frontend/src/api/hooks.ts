@@ -729,7 +729,7 @@ export function useCashFlowIncome(month: string) {
 export function useCreateCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; type: 'income' | 'expense'; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
+    mutationFn: (data: { name: string; type: 'income' | 'expense' | 'transfer'; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
       api.post<{ category: import('./types').CashFlowCategory }>('/cash-flow/categories', data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
   });
@@ -738,7 +738,7 @@ export function useCreateCategory() {
 export function useUpdateCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; name?: string; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
+    mutationFn: ({ id, ...data }: { id: string; name?: string; type?: 'income' | 'expense' | 'transfer'; tag?: 'need' | 'luxury'; defaultBudget?: number; sortOrder?: number }) =>
       api.put<{ category: import('./types').CashFlowCategory }>(`/cash-flow/categories/${id}`, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
   });
@@ -833,7 +833,7 @@ export function useDeletePaymentMethod() {
 export function useAddSpend() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { categoryId: string; paymentMethodId: string; amount: number; description?: string; spendDate: string; type: 'expense' | 'income' }) =>
+    mutationFn: (data: { categoryId: string; paymentMethodId: string; amount: number; description?: string; spendDate: string; type: 'expense' | 'income' | 'transfer' }) =>
       api.post<{ spend: import('./types').CashFlowSpend }>('/cash-flow/spends', data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow'] }); },
   });

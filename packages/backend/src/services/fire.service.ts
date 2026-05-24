@@ -37,9 +37,23 @@ export interface FireSimulationResult {
   fireAge: number;
   corpusAtRetirement: number;
   fundsLastUntilAge: number;
+  /**
+   * The earliest age at which retirement is feasible — i.e. the lowest age ≤
+   * the planned `retirementAge` for which retiring would still let funds last
+   * through `lifeExpectancy`. Equals `retirementAge` when no earlier age is
+   * feasible. Used to surface "you could retire X years earlier" insights.
+   */
+  earliestRetirementAge: number;
 }
 
-function runSimulation(sim: FireSimulation): Omit<FireSimulationResult, 'simulation'> {
+interface RawSimulationOutput {
+  rows: FireSimulationRow[];
+  effectiveReturn: number;
+  corpusAtRetirement: number;
+  fundsLastUntilAge: number;
+}
+
+function simulateCore(sim: FireSimulation): RawSimulationOutput {
   const effectiveReturn = sim.returnOnInvestment * (1 - sim.capitalGainTax);
   const rows: FireSimulationRow[] = [];
 
@@ -114,14 +128,56 @@ function runSimulation(sim: FireSimulation): Omit<FireSimulationResult, 'simulat
     if (retRow) corpusAtRetirement = retRow.corpusStart;
   }
 
+  return { rows, effectiveReturn, corpusAtRetirement, fundsLastUntilAge };
+}
+
+/**
+ * Find the earliest age between `currentAge + 1` and the planned
+ * `retirementAge` at which retiring would still let funds last through
+ * `lifeExpectancy`. Returns the planned `retirementAge` if no earlier age is
+ * feasible. Implementation: re-simulates with each candidate retirement age
+ * and picks the lowest one whose `fundsLastUntilAge >= lifeExpectancy`.
+ *
+ * Cost: O(N × M) where N = retirementAge − currentAge (typically ≤ 30) and
+ * M = full simulation length (~60 years). At ~3 scenarios this is a few
+ * thousand cheap arithmetic ops per request.
+ */
+function findEarliestRetirementAge(sim: FireSimulation): number {
+  const planned = sim.retirementAge;
+  if (planned <= sim.currentAge + 1) return planned;
+  for (let candidate = sim.currentAge + 1; candidate < planned; candidate++) {
+    const result = simulateCore({ ...sim, retirementAge: candidate });
+    if (
+      result.fundsLastUntilAge >= sim.lifeExpectancy &&
+      result.corpusAtRetirement > 0
+    ) {
+      return candidate;
+    }
+  }
+  return planned;
+}
+
+function runSimulation(sim: FireSimulation): Omit<FireSimulationResult, 'simulation'> {
+  const core = simulateCore(sim);
   return {
-    effectiveReturnRate: effectiveReturn,
-    rows,
+    effectiveReturnRate: core.effectiveReturn,
+    rows: core.rows,
     fireAge: sim.retirementAge,
-    corpusAtRetirement: Math.round(corpusAtRetirement),
-    fundsLastUntilAge,
+    corpusAtRetirement: Math.round(core.corpusAtRetirement),
+    fundsLastUntilAge: core.fundsLastUntilAge,
+    earliestRetirementAge: findEarliestRetirementAge(sim),
   };
 }
+
+/** Reserved scenario names that cannot be renamed by the user. The cash-flow
+ *  page and other surfaces rely on these names existing as a stable identity
+ *  for the primary/Lean/Fat scenarios.
+ */
+const RESERVED_SCENARIO_NAMES: ReadonlySet<string> = new Set([
+  'Base FIRE',
+  'Lean FIRE',
+  'Fat FIRE',
+]);
 
 const REFERENCE_SCENARIOS: FireSimulationInput[] = [
   {
@@ -195,6 +251,18 @@ export const fireService = {
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input)) {
       if (value !== undefined) updates[key] = value;
+    }
+
+    // Reserved scenarios (Base/Lean/Fat FIRE) keep their names locked so that
+    // the cash-flow integration and other surfaces can reliably address them.
+    // Same-name updates from auto-seed pass through silently; only renames are
+    // blocked. We just strip the field so the rest of the update still applies.
+    if (
+      RESERVED_SCENARIO_NAMES.has(existing.name) &&
+      typeof updates.name === 'string' &&
+      updates.name !== existing.name
+    ) {
+      delete updates.name;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -524,21 +592,70 @@ export const fireService = {
     return { simulations, actualPortfolio, liveValue: Math.round(liveValue), liveProgress };
   },
 
+  /**
+   * What-if: model a **single month** of saving more (or less) than the FIRE
+   * plan baseline and report the impact on each scenario. The user input is
+   * "what if I save ₹X this month?" — a one-time delta, not a permanent
+   * change to monthly saving.
+   *
+   * The delta is added to (or removed from) the corpus at the start of the
+   * current FY and grown forward to the planned retirement age at the
+   * scenario's effective (post-tax) return rate. The adjusted simulation is
+   * then re-run with the corpus offset to detect whether the extra/less
+   * saving brings retirement forward (or pushes it back) via the early-
+   * retirement check.
+   */
   async whatIf(userId: string, adjustedMonthlySaving: number): Promise<{
     scenarios: {
       id: string;
       name: string;
-      original: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
-      adjusted: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
-      delta: { retirementAgeShift: number; corpusDelta: number };
+      original: {
+        retirementAge: number;
+        corpusAtRetirement: number;
+        monthlySaving: number;
+        earliestRetirementAge: number;
+      };
+      adjusted: {
+        retirementAge: number;
+        corpusAtRetirement: number;
+        monthlySaving: number;
+        earliestRetirementAge: number;
+      };
+      delta: {
+        retirementAgeShift: number;
+        corpusDelta: number;
+        savingDelta: number;
+      };
     }[];
   }> {
     const all = await this.getAll(userId);
+    const currentYear = new Date().getFullYear();
+
     const scenarios = all.map((sim) => {
       const originalResult = runSimulation(sim);
 
-      const adjustedSim = { ...sim, monthlySaving: adjustedMonthlySaving };
-      const adjustedResult = runSimulation(adjustedSim);
+      // The FIRE plan's baseline monthly saving for the *current* FY (with
+      // annualSavingsIncrease compounded) — that's what the user is comparing
+      // against when they imagine saving more or less "this month".
+      const yearsFromStart = Math.max(0, currentYear - sim.startYear);
+      const baselineThisMonth = sim.monthlySaving * Math.pow(1 + sim.annualSavingsIncrease, yearsFromStart);
+      const oneMonthDelta = adjustedMonthlySaving - baselineThisMonth;
+
+      // Future-value the one-month delta at the post-tax effective return
+      // until the planned retirement year. This is the closed-form impact on
+      // the corpus at retirement of changing exactly one month of saving.
+      const yearsToRetirement = Math.max(0, sim.retirementAge - sim.currentAge - yearsFromStart);
+      const effectiveReturn = sim.returnOnInvestment * (1 - sim.capitalGainTax);
+      const corpusDelta = oneMonthDelta * Math.pow(1 + effectiveReturn, yearsToRetirement);
+
+      // For the early-retirement comparison, simulate with the same delta
+      // applied as a one-time bump to currentSavings (i.e. carry the extra
+      // ₹X straight onto the starting corpus). This lets us compute whether
+      // the extra month's saving lets you retire earlier.
+      const adjustedSim = { ...sim, currentSavings: sim.currentSavings + oneMonthDelta };
+      const adjustedEarliest = findEarliestRetirementAge(adjustedSim);
+
+      const adjustedCorpusAtRetirement = originalResult.corpusAtRetirement + corpusDelta;
 
       return {
         id: sim.id,
@@ -546,20 +663,61 @@ export const fireService = {
         original: {
           retirementAge: sim.retirementAge,
           corpusAtRetirement: originalResult.corpusAtRetirement,
-          monthlySaving: sim.monthlySaving,
+          monthlySaving: Math.round(baselineThisMonth),
+          earliestRetirementAge: originalResult.earliestRetirementAge,
         },
         adjusted: {
           retirementAge: sim.retirementAge,
-          corpusAtRetirement: adjustedResult.corpusAtRetirement,
-          monthlySaving: adjustedMonthlySaving,
+          corpusAtRetirement: Math.round(adjustedCorpusAtRetirement),
+          monthlySaving: Math.round(adjustedMonthlySaving),
+          earliestRetirementAge: adjustedEarliest,
         },
         delta: {
-          retirementAgeShift: 0,
-          corpusDelta: adjustedResult.corpusAtRetirement - originalResult.corpusAtRetirement,
+          // Positive = retirement pulled earlier; negative = pushed later.
+          retirementAgeShift: originalResult.earliestRetirementAge - adjustedEarliest,
+          corpusDelta: Math.round(corpusDelta),
+          savingDelta: Math.round(oneMonthDelta),
         },
       };
     });
 
     return { scenarios };
+  },
+
+  /**
+   * Lightweight helper used by the cash-flow page to derive a savings target
+   * from the FIRE plan without running the full `getMonthlyTargets` machinery
+   * (which loads every simulation, runs full multi-decade simulations, and
+   * aggregates portfolio snapshots and cash-flow spends — all wasted work
+   * when we only need a single number).
+   *
+   * Returns the primary scenario's `monthlySaving` for the requested FY,
+   * compounded by `annualSavingsIncrease`, or `null` if no simulation exists
+   * / the FY is before the simulation starts / the user is already retired.
+   */
+  async getCurrentFyInvestmentTarget(userId: string, fy: number): Promise<{
+    scenarioId: string;
+    scenarioName: string;
+    monthlySaving: number;
+  } | null> {
+    const all = await this.getAll(userId);
+    // getAll sorts Base FIRE → Lean FIRE → Fat FIRE → others, so the first
+    // entry is the primary scenario when reserved scenarios exist.
+    const primary = all[0];
+    if (!primary) return null;
+
+    if (fy < primary.startYear) return null;
+    const ageInFy = primary.currentAge + (fy - primary.startYear);
+    if (ageInFy > primary.retirementAge) return null; // retired by this FY
+
+    const yearsFromStart = fy - primary.startYear;
+    const monthlySaving = primary.monthlySaving * Math.pow(1 + primary.annualSavingsIncrease, yearsFromStart);
+    if (!Number.isFinite(monthlySaving) || monthlySaving <= 0) return null;
+
+    return {
+      scenarioId: primary.id,
+      scenarioName: primary.name,
+      monthlySaving: Math.round(monthlySaving),
+    };
   },
 };

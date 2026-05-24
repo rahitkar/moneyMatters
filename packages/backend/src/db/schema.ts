@@ -212,7 +212,14 @@ export type AppSetting = typeof appSettings.$inferSelect;
 
 // ── Cash Flow ──────────────────────────────────────────────────────
 
-export const CASH_FLOW_CATEGORY_TYPES = ['income', 'expense'] as const;
+// 'transfer' represents money movements that are *neither* income nor
+// expense — e.g. someone returning money you lent, an office reimbursement
+// hitting your account, a wallet top-up. The expense that originally went
+// out is still counted as an expense; the transfer simply records the
+// inflow without inflating "income". Transfers are excluded from
+// totalIncome / totalExpenses / savings calculations and tracked as a
+// separate `totalTransfers` total for visibility.
+export const CASH_FLOW_CATEGORY_TYPES = ['income', 'expense', 'transfer'] as const;
 export type CashFlowCategoryType = (typeof CASH_FLOW_CATEGORY_TYPES)[number];
 
 export const EXPENSE_TAGS = ['need', 'luxury'] as const;

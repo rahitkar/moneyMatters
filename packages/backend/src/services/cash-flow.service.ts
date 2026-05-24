@@ -14,6 +14,7 @@ import type {
 import { getCycleMonth, getCycleDateRange, getCycleStartDay } from './cycle.utils.js';
 import { transactionService } from './transaction.service.js';
 import { fireService } from './fire.service.js';
+import { exchangeRateProvider } from '../providers/exchange-rate.provider.js';
 
 // ── Category CRUD ─────────────────────────────────────────────────
 
@@ -27,6 +28,13 @@ export interface CreateCategoryInput {
 
 export interface UpdateCategoryInput {
   name?: string;
+  /**
+   * Changing type cascades to every cash_flow_spends row for this category
+   * (their `type` column is rewritten to match) so that summary totals stay
+   * consistent. The expense `tag` is automatically nulled when switching
+   * away from 'expense', and defaulted to 'need' when switching to it.
+   */
+  type?: CashFlowCategoryType;
   tag?: ExpenseTag;
   defaultBudget?: number;
   sortOrder?: number;
@@ -63,6 +71,7 @@ export const cashFlowService = {
       userId,
       name: input.name,
       type: input.type,
+      // tag (need/luxury) only applies to expenses
       tag: input.type === 'expense' ? (input.tag ?? 'need') : null,
       defaultBudget: input.defaultBudget ?? 0,
       sortOrder: input.sortOrder ?? 0,
@@ -85,15 +94,45 @@ export const cashFlowService = {
       .then((r) => r[0]);
     if (!existing) return null;
 
+    // Determine the resolved tag. If type is changing away from 'expense',
+    // null the tag; if changing to 'expense' and no tag set, default 'need'.
+    let resolvedTag: ExpenseTag | null | undefined = undefined;
+    const typeChanging = input.type !== undefined && input.type !== existing.type;
+    if (typeChanging) {
+      if (input.type === 'expense') {
+        resolvedTag = input.tag ?? (existing.tag as ExpenseTag | null) ?? 'need';
+      } else {
+        resolvedTag = null;
+      }
+    } else if (input.tag !== undefined) {
+      resolvedTag = input.tag;
+    }
+
     await db
       .update(schema.cashFlowCategories)
       .set({
         ...(input.name !== undefined && { name: input.name }),
-        ...(input.tag !== undefined && { tag: input.tag }),
+        ...(input.type !== undefined && { type: input.type }),
+        ...(resolvedTag !== undefined && { tag: resolvedTag }),
         ...(input.defaultBudget !== undefined && { defaultBudget: input.defaultBudget }),
         ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
       })
       .where(and(eq(schema.cashFlowCategories.id, id), eq(schema.cashFlowCategories.userId, userId)));
+
+    // Cascade type change to every spend row in this category. Without
+    // this, summary totals would disagree: entries get bucketed by the
+    // category's new type while spends still self-report the old type.
+    if (typeChanging) {
+      await db
+        .update(schema.cashFlowSpends)
+        .set({ type: input.type })
+        .where(
+          and(
+            eq(schema.cashFlowSpends.categoryId, id),
+            eq(schema.cashFlowSpends.userId, userId),
+          ),
+        );
+    }
 
     return db
       .select()
@@ -551,9 +590,10 @@ export const cashFlowService = {
   // ── Investment derivation from existing transactions ──────────
 
   async getInvestmentBreakdown(userId: string, month: string): Promise<{
-    investments: { assetId: string; name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }[];
+    investments: { assetId: string; name: string; symbol: string; currency: string; amount: number; amountInr: number; foreignQuantity: number | null; fundSourceId: string | null }[];
     walletTransfers: number;
     bankInvestments: number;
+    usdInrRate: number | null;
   }> {
     const cycleDay = await getCycleStartDay(userId);
     const { start, end } = getCycleDateRange(month, cycleDay);
@@ -588,32 +628,80 @@ export const cashFlowService = {
     const cashAssetIds = new Set(cashAssets.map((a) => a.id));
     const primaryBankId = cashAssets.find((a) => a.symbol.includes('SAVINGS-ACCOUNT'))?.id ?? null;
 
+    // Resolve USD->INR once per request (current rate, mirroring how the
+    // rest of the app — performance/portfolio services — display foreign
+    // holdings). Without this, USD cash-asset top-ups and USD-funded buys
+    // would mix raw dollars with rupees in the totals.
+    const fxResult = await exchangeRateProvider.getRate('USD', 'INR').catch(() => null);
+    const usdInrRate = fxResult?.rate ?? null;
+
+    const inrAmount = (tx: typeof allTx[number]): number => {
+      const raw = tx.quantity * tx.price;
+      if (tx.assetCurrency === 'INR' || !tx.assetCurrency) return raw;
+      if (tx.assetCurrency === 'USD' && usdInrRate) return raw * usdInrRate;
+      // Unknown currency w/o rate: fall back to raw value (better than 0;
+      // rare in practice since we only see USD here).
+      return raw;
+    };
+
     const investmentTx: typeof allTx = [];
     let walletTransfers = 0;
     let bankInvestments = 0;
 
     for (const tx of allTx) {
       if (tx.type !== 'buy') continue;
-      // Cash-to-cash transfers (e.g. bank → broker wallet) are money movements, not investments
+      const inr = inrAmount(tx);
+
+      // Cash-to-cash transfers (e.g. bank → broker wallet, including USD
+      // wallets like INDMONEY funded from Kotak savings) are money
+      // movements, not investments. The wallet top-up itself represents
+      // "money leaving the bank toward investment" — only count as a
+      // walletTransfer when the source is the primary bank, so the
+      // bank-balance waterfall reflects the outflow exactly once.
       if (tx.fundSourceId && cashAssetIds.has(tx.assetId) && cashAssetIds.has(tx.fundSourceId)) {
-        if (tx.fundSourceId === primaryBankId) walletTransfers += tx.quantity * tx.price;
+        if (tx.fundSourceId === primaryBankId) walletTransfers += inr;
         continue;
       }
-      // Connected ledger: funded by a cash/bank asset
+      // Buy of a non-cash asset funded by a cash/bank source.
       if (tx.fundSourceId && cashAssetIds.has(tx.fundSourceId)) {
+        // Always include as an investment line (the user wants to see
+        // "I bought 0.7 shares of PG" in the breakdown).
         investmentTx.push(tx);
-        if (tx.fundSourceId === primaryBankId) bankInvestments += tx.quantity * tx.price;
+        // Only add to bankInvestments when funded directly from the
+        // primary bank. Buys funded out of broker wallets (INDmoney,
+        // Zerodha) are downstream allocations of money that already left
+        // the bank when the wallet was topped up — counting them again
+        // here would double-count the bank outflow.
+        if (tx.fundSourceId === primaryBankId) bankInvestments += inr;
         continue;
       }
-      // Legacy fallback: only non-INR cash deposits (e.g. USD wallets) without explicit fund source.
-      if (!tx.fundSourceId && tx.assetClass === 'cash' && tx.assetCurrency !== 'INR') { investmentTx.push(tx); continue; }
+      // A buy with no fund_source represents money credited to the
+      // asset from outside the tracked-cash universe — typically a
+      // dividend, interest payout, gift, or a manual balance top-up
+      // recorded for bookkeeping. It is intentionally NOT treated as a
+      // bank outflow, wallet transfer, or investment line: there's no
+      // source to debit, and the cash-flow waterfall only models money
+      // moving between tracked accounts. The user can attach a
+      // fund_source later if it actually came from somewhere we track.
     }
 
-    const grouped = new Map<string, { name: string; symbol: string; currency: string; amount: number; foreignQuantity: number | null; fundSourceId: string | null }>();
+    const grouped = new Map<string, { name: string; symbol: string; currency: string; amount: number; amountInr: number; foreignQuantity: number | null; fundSourceId: string | null }>();
     for (const tx of investmentTx) {
       const isForeign = tx.assetCurrency !== 'INR';
-      const existing = grouped.get(tx.assetId) ?? { name: tx.assetName, symbol: tx.assetSymbol, currency: tx.assetCurrency ?? 'INR', amount: 0, foreignQuantity: isForeign ? 0 : null, fundSourceId: tx.fundSourceId };
+      const existing = grouped.get(tx.assetId) ?? {
+        name: tx.assetName,
+        symbol: tx.assetSymbol,
+        currency: tx.assetCurrency ?? 'INR',
+        // `amount` is in the asset's native currency (USD for PG, INR for
+        // Indian MFs) — keep it raw so the foreign-quantity badge can show
+        // "$99.71" alongside the INR conversion.
+        amount: 0,
+        amountInr: 0,
+        foreignQuantity: isForeign ? 0 : null,
+        fundSourceId: tx.fundSourceId,
+      };
       existing.amount += tx.quantity * tx.price;
+      existing.amountInr += inrAmount(tx);
       if (isForeign && existing.foreignQuantity !== null) {
         existing.foreignQuantity += tx.quantity;
       }
@@ -624,6 +712,7 @@ export const cashFlowService = {
       investments: Array.from(grouped, ([assetId, data]) => ({ assetId, ...data })),
       walletTransfers,
       bankInvestments,
+      usdInrRate,
     };
   },
 
@@ -651,6 +740,7 @@ export const cashFlowService = {
   async _computeClosingBalance(userId: string, month: string, openingBalance: number): Promise<number | null> {
     const spends = await this.getSpendsForMonth(userId, month);
     const incomeFromSpends = spends.filter((s) => s.type === 'income').reduce((s, r) => s + r.amount, 0);
+    const totalTransfers = spends.filter((s) => s.type === 'transfer').reduce((s, r) => s + r.amount, 0);
     const prevIncome = await this.getIncome(userId, month);
     const legacyIncome = (prevIncome?.salary ?? 0) + (prevIncome?.otherIncome ?? 0);
     const totalIncome = incomeFromSpends > 0 ? incomeFromSpends : legacyIncome;
@@ -666,7 +756,7 @@ export const cashFlowService = {
 
     const breakdown = await this.getInvestmentBreakdown(userId, month);
 
-    return openingBalance + totalIncome - totalExpenses - breakdown.bankInvestments - breakdown.walletTransfers;
+    return openingBalance + totalIncome + totalTransfers - totalExpenses - breakdown.bankInvestments - breakdown.walletTransfers;
   },
 
   // ── Month summary ─────────────────────────────────────────────
@@ -715,6 +805,18 @@ export const cashFlowService = {
         categoryName: string; createdAt: Date;
       }[];
 
+    const transferRows = entries
+      .map((e) => {
+        const cat = categoryMap.get(e.categoryId);
+        if (!cat || cat.type !== 'transfer') return null;
+        return { ...e, categoryName: cat.name };
+      })
+      .filter(Boolean) as {
+        id: string; categoryId: string; entryMonth: string;
+        budget: number | null; actual: number | null; notes: string | null;
+        categoryName: string; createdAt: Date;
+      }[];
+
     // Income from spend entries (salary is now logged as an income spend)
     const incomeFromSpends = spends.filter((s) => s.type === 'income').reduce((s, r) => s + r.amount, 0);
     // Fallback: also include legacy salary/otherIncome if no income spends exist
@@ -723,13 +825,27 @@ export const cashFlowService = {
     const legacyIncome = legacySalary + legacyOtherIncome;
     const totalIncome = incomeFromSpends > 0 ? incomeFromSpends : legacyIncome;
 
+    // Split transfers by payment method, mirroring how expenses are split:
+    // CC-paid expenses go onto the credit card bill; CC-credited transfers
+    // *reduce* the credit card bill (e.g. someone paying you back by
+    // crediting the card directly). Transfers via bank/cash/upi/debit are
+    // direct bank inflows. This keeps the bank-balance math symmetric.
+    const transferSpendList = spends.filter((s) => s.type === 'transfer');
+    const totalTransfers = transferSpendList.reduce((s, r) => s + r.amount, 0);
+    const ccTransferCredits = transferSpendList
+      .filter((s) => paymentMethods.find((p) => p.id === s.paymentMethodId)?.type === 'credit_card')
+      .reduce((s, r) => s + r.amount, 0);
+    const cashUpiTransfersIn = totalTransfers - ccTransferCredits;
+
     const totalNeed = expenseRows.filter((r) => r.tag === 'need').reduce((s, r) => s + (r.actual ?? 0), 0);
     const totalLuxury = expenseRows.filter((r) => r.tag === 'luxury').reduce((s, r) => s + (r.actual ?? 0), 0);
     const totalExpenses = totalNeed + totalLuxury;
     const totalBudget = expenseRows.reduce((s, r) => s + (r.budget ?? 0), 0);
     const totalOverspend = totalExpenses - totalBudget;
 
-    const totalInvested = investments.reduce((s, i) => s + i.amount, 0);
+    // Sum INR-converted values so USD-denominated holdings (e.g. INDmoney
+    // US stocks) don't get added as raw dollars to rupees.
+    const totalInvested = investments.reduce((s, i) => s + i.amountInr, 0);
 
     const netSavings = totalIncome - totalExpenses - totalInvested;
 
@@ -758,37 +874,41 @@ export const cashFlowService = {
       if (prevClosing !== null) openingBalance = prevClosing;
     }
     const bankOutflow = bankInvestments + walletTransfers;
+    // Closing balance / savings is the post-CC-paid view: bank balance
+    // assuming you pay off the (net) CC bill in full. Transfers add to
+    // the carry — bank-side transfers as direct inflows, CC-side
+    // transfers indirectly via reducing the CC bill below.
     const savings = openingBalance !== null
-      ? openingBalance + totalIncome - totalExpenses - bankOutflow
-      : totalIncome - totalExpenses - bankOutflow;
+      ? openingBalance + totalIncome + totalTransfers - totalExpenses - bankOutflow
+      : totalIncome + totalTransfers - totalExpenses - bankOutflow;
     const closingBalance = openingBalance !== null ? savings : null;
 
-    // CC bill: sum of credit_card payment method expenses
-    const ccBillTotal = spends
+    // CC bill is the *net* amount owed after applying any transfer credits
+    // that landed on the credit card. If credits exceed expenses (unusual
+    // but possible during heavy reimbursement months), this can be 0 or
+    // negative — payCcBill already guards against that.
+    const ccGrossExpenses = spends
       .filter((s) => s.type === 'expense' && paymentMethods.find((p) => p.id === s.paymentMethodId)?.type === 'credit_card')
       .reduce((sum, s) => sum + s.amount, 0);
-    const cashUpiExpenses = totalExpenses - ccBillTotal;
+    const ccBillTotal = ccGrossExpenses - ccTransferCredits;
+    const cashUpiExpenses = totalExpenses - ccGrossExpenses;
 
-    // Derive savings target from FIRE if not manually set
+    // Derive savings target from FIRE if not manually set. We use the
+    // dedicated lightweight helper instead of getMonthlyTargets — that one
+    // runs full multi-decade simulations for every scenario, loads all
+    // portfolio snapshots, and aggregates all cash-flow spends. We just need
+    // the primary scenario's FY monthly saving here.
     let savingsTarget = income?.savingsTarget ?? null;
     let savingsTargetSource: 'manual' | 'fire' | null = savingsTarget !== null ? 'manual' : null;
-    let fireScenarioTargets: { id: string; name: string; monthlySaving: number }[] = [];
 
     if (savingsTarget === null) {
       try {
         const [y, m] = month.split('-').map(Number);
         const fy = m >= 4 ? y : y - 1;
-        const fireTargets = await fireService.getMonthlyTargets(userId, fy);
-        if (fireTargets.scenarios.length > 0) {
-          fireScenarioTargets = fireTargets.scenarios;
-          const monthData = fireTargets.months.find((fm) => fm.month === month);
-          if (monthData && fireTargets.scenarios[0]) {
-            const baseTarget = monthData.investmentTargets[fireTargets.scenarios[0].id];
-            if (baseTarget && baseTarget > 0) {
-              savingsTarget = baseTarget;
-              savingsTargetSource = 'fire';
-            }
-          }
+        const fireTarget = await fireService.getCurrentFyInvestmentTarget(userId, fy);
+        if (fireTarget && fireTarget.monthlySaving > 0) {
+          savingsTarget = fireTarget.monthlySaving;
+          savingsTargetSource = 'fire';
         }
       } catch {}
     }
@@ -808,9 +928,10 @@ export const cashFlowService = {
         investmentTarget: income?.investmentTarget ?? null,
         savingsTarget,
         savingsTargetSource,
-        fireScenarioTargets,
       },
       expenses: expenseRows,
+      transfers: transferRows,
+      transferSpends: spends.filter((s) => s.type === 'transfer'),
       investments,
       spends,
       paymentMethodBreakdown,
@@ -819,6 +940,9 @@ export const cashFlowService = {
         totalIncome,
         cashUpiExpenses,
         ccBillTotal,
+        ccGrossExpenses,
+        ccTransferCredits,
+        cashUpiTransfersIn,
         totalInvested,
         bankInvestments,
         walletTransfers,
@@ -833,6 +957,9 @@ export const cashFlowService = {
         totalNeed,
         totalLuxury,
         totalInvested,
+        totalTransfers,
+        cashUpiTransfersIn,
+        ccTransferCredits,
         bankInvestments,
         walletTransfers,
         netSavings,
@@ -942,7 +1069,8 @@ export const cashFlowService = {
     const ob = summary.waterfall.openingBalance;
     const bi = summary.waterfall.bankInvestments ?? 0;
     const wt = summary.waterfall.walletTransfers ?? 0;
-    return ob + summary.waterfall.totalIncome - bi - wt - summary.waterfall.cashUpiExpenses;
+    const transfersIn = summary.waterfall.cashUpiTransfersIn ?? 0;
+    return ob + summary.waterfall.totalIncome + transfersIn - bi - wt - summary.waterfall.cashUpiExpenses;
   },
 
   async syncPreview(userId: string, month: string): Promise<{

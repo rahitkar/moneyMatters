@@ -17,6 +17,12 @@ packages/backend/data/money-matters.db-journal
 packages/backend/data/money-matters.db-wal
 packages/backend/data/money-matters.db-shm
 
+# Local data dumps, backups, and ad-hoc migration scripts
+packages/backend/data/*.db
+packages/backend/data/*.db.bak
+packages/backend/data/*.sql
+packages/backend/data/*-snapshot-*
+
 # IDE / Editor
 .vscode/
 .idea/

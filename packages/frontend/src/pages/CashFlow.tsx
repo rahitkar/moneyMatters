@@ -20,6 +20,7 @@ import {
   Flame,
   ChevronDown,
   ChevronRight,
+  ArrowLeftRight,
 } from 'lucide-react';
 import {
   BarChart,
@@ -43,7 +44,7 @@ import StatCard from '../components/StatCard';
 import Modal from '../components/Modal';
 import EmptyState from '../components/EmptyState';
 import { LoadingPage } from '../components/LoadingSpinner';
-import { formatCurrency, todayLocal } from '../lib/format';
+import { formatCurrency, formatLakhCrore, todayLocal } from '../lib/format';
 import {
   useCashFlowSummary,
   useCashFlowCategories,
@@ -53,6 +54,7 @@ import {
   useUpsertMonthConfig,
   useCreateCategory,
   useDeleteCategory,
+  useUpdateCategory,
   useUpsertEntry,
   useUpdateEntry,
   useDeleteEntry,
@@ -79,6 +81,7 @@ import {
 } from '../api/hooks';
 import type {
   CashFlowCategory,
+  CashFlowCategoryType,
   CashFlowSpend,
   ExpenseTag,
   PaymentMethod,
@@ -203,6 +206,14 @@ export default function CashFlow() {
   const fireWhatIf = useFireWhatIf();
   const [whatIfOpen, setWhatIfOpen] = useState(false);
   const [whatIfSavings, setWhatIfSavings] = useState('');
+
+  // Reset what-if state when the user navigates to a different month so they
+  // don't see January's hypothetical cards while looking at February.
+  useEffect(() => {
+    setWhatIfSavings('');
+    setWhatIfOpen(false);
+    fireWhatIf.reset();
+  }, [selectedMonth]);
 
   const hasData = summary && (summary.expenses.length > 0 || summary.income.totalIncome > 0 || summary.spends.length > 0);
   const hasCategories = categories && categories.length > 0;
@@ -395,12 +406,14 @@ export default function CashFlow() {
               const ob = summary.waterfall.openingBalance ?? 0;
               const bi = summary.waterfall.bankInvestments ?? 0;
               const wt = summary.waterfall.walletTransfers ?? 0;
-              const currentBankBalance = ob + summary.waterfall.totalIncome - bi - wt - summary.waterfall.cashUpiExpenses;
+              const transfersIn = summary.waterfall.cashUpiTransfersIn ?? 0;
+              const currentBankBalance = ob + summary.waterfall.totalIncome + transfersIn - bi - wt - summary.waterfall.cashUpiExpenses;
               return (
                 <div className="space-y-1.5 text-sm">
                   {[
                     { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
                     { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
+                    ...(transfersIn > 0 ? [{ label: 'Transfers In (reimbursements, money returned)', value: transfersIn, color: 'text-sky-400', sign: '+' }] : []),
                     ...(bi > 0 ? [{ label: 'Investment Transfers', value: bi, color: 'text-blue-400', sign: '−' }] : []),
                     ...(wt > 0 ? [{ label: 'Wallet / Broker Transfers', value: wt, color: 'text-purple-400', sign: '−' }] : []),
                     { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
@@ -431,7 +444,15 @@ export default function CashFlow() {
                   )}
                   <div className="flex items-center justify-between py-1 border-b border-surface-800">
                     <div className="flex items-center gap-2">
-                      <span className="text-surface-400">− Credit Card Spends</span>
+                      <span className="text-surface-400">− Credit Card Bill (net)</span>
+                      {summary.waterfall.ccTransferCredits > 0 && (
+                        <span
+                          className="text-[10px] text-surface-500"
+                          title={`Gross spends ${formatCurrency(summary.waterfall.ccGrossExpenses, 'INR')} − transfer credits ${formatCurrency(summary.waterfall.ccTransferCredits, 'INR')}`}
+                        >
+                          ({formatCurrency(summary.waterfall.ccGrossExpenses, 'INR')} − {formatCurrency(summary.waterfall.ccTransferCredits, 'INR')} credits)
+                        </span>
+                      )}
                       {summary.waterfall.ccBillTotal > 0 && (
                         <button
                           onClick={() => setShowCcPayDialog(true)}
@@ -503,28 +524,57 @@ export default function CashFlow() {
               icon={Sparkles}
               variant="negative"
             />
+            {summary.totals.totalTransfers > 0 && (
+              <StatCard
+                label="Transfers"
+                value={formatCurrency(summary.totals.totalTransfers, 'INR')}
+                subValue="Reimbursements, money returned"
+                icon={ArrowLeftRight}
+                variant="brand"
+              />
+            )}
           </div>
 
-          {/* FIRE Status Indicators */}
-          {fireMonthlyTargets && fireMonthlyTargets.scenarios.length > 0 && summary.totals.totalIncome > 0 && (
+          {/* FIRE Status Indicators — two complementary views.
+
+              Row 1 (This month's saving): compares this month's savings
+              (income − expenses) against each scenario's monthly saving
+              target. Tells you whether you're saving enough THIS MONTH.
+
+              Row 2 (Corpus to date): compares the actual portfolio value
+              for the selected month (latest snapshot) against each
+              scenario's interpolated month-end corpus target. Tells you
+              whether you're at the right point on the FIRE trajectory
+              CUMULATIVELY — captures the compounding effect of past
+              investing decisions, market returns, etc. that the
+              monthly-saving view misses.
+
+              Together they answer: "am I saving enough this month?" AND
+              "am I where I should be overall?". Both can disagree —
+              you can be a great saver this month but still behind on
+              corpus because of a previous slump. */}
+          {fireMonthlyTargets && fireMonthlyTargets.scenarios.length > 0 && (
             <Card padding="sm">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-3">
                 <Flame className="w-4 h-4 text-orange-400" />
-                <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">FIRE Savings Targets</span>
+                <span className="text-xs font-semibold text-surface-400 uppercase tracking-wider">FIRE Status</span>
                 {summary.income.savingsTargetSource === 'fire' && (
-                  <span className="text-[10px] text-surface-600">(derived from FIRE)</span>
+                  <span className="text-[10px] text-surface-600">(driving Savings Target)</span>
                 )}
               </div>
-              <div className="flex flex-wrap gap-3">
+
+              {/* Row 1: Monthly saving status */}
+              <div className="mb-1 text-[10px] font-medium text-surface-500 uppercase tracking-wider">This month's saving</div>
+              <div className="flex flex-wrap gap-2 mb-1">
                 {fireMonthlyTargets.scenarios.map((scen, idx) => {
                   const monthData = fireMonthlyTargets.months.find((fm) => fm.month === selectedMonth);
                   const target = monthData?.investmentTargets[scen.id] ?? 0;
-                  const actualSavings = summary.totals.totalIncome - summary.totals.totalExpenses;
-                  const diff = actualSavings - target;
+                  const actualSaved = summary.totals.totalIncome - summary.totals.totalExpenses;
+                  const diff = actualSaved - target;
                   const isAhead = diff >= 0;
                   return (
                     <div
-                      key={scen.id}
+                      key={`save-${scen.id}`}
                       className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700/50"
                     >
                       <span
@@ -542,10 +592,83 @@ export default function CashFlow() {
                   );
                 })}
               </div>
+              <p className="text-[10px] text-surface-600 mb-3">
+                Saved this month: {formatCurrency(summary.totals.totalIncome - summary.totals.totalExpenses, 'INR')} (income − expenses) vs each scenario's required monthly saving.
+              </p>
+
+              {/* Row 2: Corpus to date — point-in-time portfolio vs interpolated FIRE trajectory */}
+              {(() => {
+                const monthData = fireMonthlyTargets.months.find((fm) => fm.month === selectedMonth);
+                const actualCorpus = monthData?.actual ?? null;
+                return (
+                  <>
+                    <div className="mb-1 text-[10px] font-medium text-surface-500 uppercase tracking-wider">Corpus to date</div>
+                    <div className="flex flex-wrap gap-2 mb-1">
+                      {fireMonthlyTargets.scenarios.map((scen, idx) => {
+                        const corpusTarget = monthData?.targets[scen.id] ?? 0;
+                        if (actualCorpus == null || corpusTarget <= 0) {
+                          return (
+                            <div
+                              key={`corpus-${scen.id}`}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/30 border border-surface-700/30"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full opacity-60"
+                                style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
+                              />
+                              <span className="text-xs text-surface-400">{scen.name}:</span>
+                              <span className="text-[11px] text-surface-600">No snapshot yet</span>
+                              {corpusTarget > 0 && (
+                                <span className="text-[10px] text-surface-600">
+                                  (target: {formatLakhCrore(corpusTarget)})
+                                </span>
+                              )}
+                            </div>
+                          );
+                        }
+                        const diff = actualCorpus - corpusTarget;
+                        const isAhead = diff >= 0;
+                        return (
+                          <div
+                            key={`corpus-${scen.id}`}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700/50"
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full"
+                              style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
+                            />
+                            <span className="text-xs text-surface-300">{scen.name}:</span>
+                            <span className={clsx('text-xs font-medium', isAhead ? 'text-green-400' : 'text-red-400')}>
+                              {isAhead ? `+${formatCurrency(diff, 'INR')} ahead` : `${formatCurrency(Math.abs(diff), 'INR')} behind`}
+                            </span>
+                            <span className="text-[10px] text-surface-600">
+                              (target: {formatLakhCrore(corpusTarget)})
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-surface-600">
+                      {actualCorpus != null
+                        ? <>Portfolio at {selectedMonth}: <strong className="text-surface-400">{formatLakhCrore(actualCorpus)}</strong> vs each scenario's interpolated month-end corpus target. Captures cumulative progress including past savings, returns, and market moves.</>
+                        : <>No portfolio snapshot recorded for {selectedMonth} yet — the corpus comparison will appear once a snapshot exists for this month.</>
+                      }
+                    </p>
+                  </>
+                );
+              })()}
             </Card>
           )}
 
-          {/* FIRE What-If Panel */}
+          {/* FIRE What-If Panel
+              Models a single month's saving (income − expenses, NOT
+              invested). The delta between the entered amount and the FIRE
+              plan's baseline monthly saving for the current FY is
+              future-valued at the post-tax effective return and added to
+              the corpus at retirement. The early-retirement shift comes
+              from re-running the simulation with the delta applied as a
+              one-time bump to currentSavings and finding the new
+              earliestRetirementAge. */}
           {fireMonthlyTargets && fireMonthlyTargets.scenarios.length > 0 && (
             <Card padding="sm">
               <button
@@ -554,26 +677,26 @@ export default function CashFlow() {
               >
                 {whatIfOpen ? <ChevronDown className="w-4 h-4 text-surface-400" /> : <ChevronRight className="w-4 h-4 text-surface-400" />}
                 <Flame className="w-4 h-4 text-orange-400" />
-                <span className="text-sm font-medium text-surface-200">What-If: FIRE Impact</span>
-                <span className="text-[10px] text-surface-600 ml-1">What if I save more/less this month?</span>
+                <span className="text-sm font-medium text-surface-200">What-If: FIRE Impact of One Month's Saving</span>
+                <span className="text-[10px] text-surface-600 ml-1">If I save ₹X this month instead of my plan's baseline, how does retirement shift?</span>
               </button>
               {whatIfOpen && (
                 <div className="mt-4 space-y-4">
-                  <div className="flex items-end gap-3">
+                  <div className="flex items-end gap-3 flex-wrap">
                     <div>
-                      <label className="block text-[10px] text-surface-500 mb-0.5">Monthly Savings (₹)</label>
+                      <label className="block text-[10px] text-surface-500 mb-0.5">This month's saving (₹) <span className="text-surface-600">— income − expenses</span></label>
                       <input
                         type="number"
                         value={whatIfSavings}
                         onChange={(e) => setWhatIfSavings(e.target.value)}
-                        placeholder={String(summary?.totals.totalIncome ? summary.totals.totalIncome - summary.totals.totalExpenses : 0)}
+                        placeholder={String(summary ? Math.max(0, Math.round(summary.totals.totalIncome - summary.totals.totalExpenses)) : 0)}
                         className="w-40 px-3 py-1.5 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500 tabular-nums"
                       />
                     </div>
                     <button
                       onClick={() => {
                         const val = parseFloat(whatIfSavings);
-                        if (!isNaN(val) && val >= 0) fireWhatIf.mutate(val);
+                        if (Number.isFinite(val) && val >= 0 && val <= 100_00_000) fireWhatIf.mutate(val);
                       }}
                       disabled={fireWhatIf.isPending || !whatIfSavings}
                       className="btn btn-primary text-sm py-1.5"
@@ -582,46 +705,58 @@ export default function CashFlow() {
                     </button>
                     {summary && (
                       <span className="text-[10px] text-surface-600">
-                        Current: {formatCurrency(summary.totals.totalIncome - summary.totals.totalExpenses, 'INR')}/mo
+                        Actually saved this month: {formatCurrency(summary.totals.totalIncome - summary.totals.totalExpenses, 'INR')} (income − expenses)
                       </span>
                     )}
                   </div>
                   {fireWhatIf.data && (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {fireWhatIf.data.scenarios.map((scen, idx) => (
-                        <div
-                          key={scen.id}
-                          className="p-3 rounded-xl bg-surface-800/50 border border-surface-700/50"
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <span
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
-                            />
-                            <span className="text-sm font-medium text-surface-200">{scen.name}</span>
+                      {fireWhatIf.data.scenarios.map((scen, idx) => {
+                        const ageShift = scen.delta.retirementAgeShift;
+                        const ageShiftLabel = ageShift > 0
+                          ? `${ageShift}y earlier`
+                          : ageShift < 0
+                            ? `${Math.abs(ageShift)}y later`
+                            : 'no change';
+                        return (
+                          <div
+                            key={scen.id}
+                            className="p-3 rounded-xl bg-surface-800/50 border border-surface-700/50"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: FIRE_COLORS[idx % FIRE_COLORS.length] }}
+                              />
+                              <span className="text-sm font-medium text-surface-200">{scen.name}</span>
+                            </div>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between">
+                                <span className="text-surface-500">Corpus impact</span>
+                                <span className={clsx('font-mono font-medium', scen.delta.corpusDelta >= 0 ? 'text-green-400' : 'text-red-400')}>
+                                  {scen.delta.corpusDelta >= 0 ? '+' : ''}{formatCurrency(scen.delta.corpusDelta, 'INR')}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-surface-500">Earliest retirement</span>
+                                <span className={clsx('font-mono font-medium', ageShift > 0 ? 'text-green-400' : ageShift < 0 ? 'text-red-400' : 'text-surface-400')}>
+                                  Age {scen.adjusted.earliestRetirementAge} ({ageShiftLabel})
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-1 border-t border-surface-700/50">
+                                <span className="text-surface-500">Plan baseline this month</span>
+                                <span className="text-surface-400 font-mono">{formatCurrency(scen.original.monthlySaving, 'INR')}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-surface-500">One-month delta</span>
+                                <span className={clsx('font-mono', scen.delta.savingDelta >= 0 ? 'text-green-400/80' : 'text-red-400/80')}>
+                                  {scen.delta.savingDelta >= 0 ? '+' : ''}{formatCurrency(scen.delta.savingDelta, 'INR')}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-surface-500">Corpus at Retirement</span>
-                              <span className={clsx('font-mono font-medium', scen.delta.corpusDelta >= 0 ? 'text-green-400' : 'text-red-400')}>
-                                {scen.delta.corpusDelta >= 0 ? '+' : ''}{formatCurrency(scen.delta.corpusDelta, 'INR')}
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-surface-500">Original Corpus</span>
-                              <span className="text-surface-300 font-mono">{formatCurrency(scen.original.corpusAtRetirement, 'INR')}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-surface-500">Adjusted Corpus</span>
-                              <span className="text-surface-100 font-mono font-medium">{formatCurrency(scen.adjusted.corpusAtRetirement, 'INR')}</span>
-                            </div>
-                            <div className="flex justify-between pt-1 border-t border-surface-700/50">
-                              <span className="text-surface-500">Original Saving</span>
-                              <span className="text-surface-400 font-mono">{formatCurrency(scen.original.monthlySaving, 'INR')}/mo</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -711,17 +846,25 @@ export default function CashFlow() {
               <Card>
                 <h2 className="text-lg font-semibold text-surface-100 mb-4">Investment Breakdown</h2>
                 <div className="space-y-2">
-                  {summary.investments.map((inv) => (
-                    <div key={inv.assetId} className="flex items-center justify-between py-2 border-b border-surface-800 last:border-0">
-                      <div className="flex flex-col">
-                        <span className="text-surface-300 text-sm">{inv.name}</span>
-                        {inv.currency !== 'INR' && inv.foreignQuantity != null && (
-                          <span className="text-surface-500 text-xs">{formatCurrency(inv.foreignQuantity, inv.currency)}</span>
-                        )}
+                  {summary.investments.map((inv) => {
+                    const isForeign = inv.currency !== 'INR';
+                    return (
+                      <div key={inv.assetId} className="flex items-center justify-between py-2 border-b border-surface-800 last:border-0">
+                        <div className="flex flex-col">
+                          <span className="text-surface-300 text-sm">{inv.name}</span>
+                          {isForeign && (
+                            <span className="text-surface-500 text-xs">
+                              {formatCurrency(inv.amount, inv.currency)}
+                              {inv.foreignQuantity != null && (
+                                <span className="text-surface-600"> · {inv.foreignQuantity.toFixed(4)} units</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-surface-100 font-medium tabular-nums">{formatCurrency(inv.amountInr, 'INR')}</span>
                       </div>
-                      <span className="text-surface-100 font-medium tabular-nums">{formatCurrency(inv.amount, 'INR')}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center justify-between pt-2 font-semibold">
                     <span className="text-surface-300">Total Invested</span>
                     <span className="text-brand-400 tabular-nums">{formatCurrency(summary.totals.totalInvested, 'INR')}</span>
@@ -741,7 +884,7 @@ export default function CashFlow() {
                     const isForeign = pos.currency !== 'INR';
                     const isSavingsAccount = pos.symbol.includes('SAVINGS-ACCOUNT');
                     const bankBal = isSavingsAccount && summary?.waterfall.openingBalance != null
-                      ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
+                      ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome + (summary.waterfall.cashUpiTransfersIn ?? 0) - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
                       : null;
                     const displayValue = bankBal ?? pos.currentValue;
                     const inrValue = isForeign && usdToInr ? displayValue * usdToInr : displayValue;
@@ -774,7 +917,7 @@ export default function CashFlow() {
                         cashPositions.reduce((sum, p) => {
                           const isSav = p.symbol.includes('SAVINGS-ACCOUNT');
                           const bankVal = isSav && summary?.waterfall.openingBalance != null
-                            ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
+                            ? (summary.waterfall.openingBalance ?? 0) + summary.waterfall.totalIncome + (summary.waterfall.cashUpiTransfersIn ?? 0) - (summary.waterfall.bankInvestments ?? 0) - (summary.waterfall.walletTransfers ?? 0) - summary.waterfall.cashUpiExpenses
                             : null;
                           const val = bankVal ?? p.currentValue;
                           if (p.currency === 'INR') return sum + val;
@@ -862,11 +1005,20 @@ export default function CashFlow() {
                     for (const scen of fireMonthlyTargets.scenarios) {
                       const monthData = fireMonthlyTargets.months.find((fm) => fm.month === m.month);
                       if (monthData) {
+                        // FIRE save target — what the FIRE plan needs you
+                        // to set aside (income − expenses) each month. The
+                        // backend field is still called investmentTargets
+                        // because it maps to FIRE's monthly_saving column.
                         point[`fire_${scen.id}`] = monthData.investmentTargets[scen.id] ?? undefined;
                       }
                     }
                   }
-                  if (!fireMonthlyTargets && m.income.savingsTarget != null) {
+                  // Manual Savings Target only renders when the user has
+                  // explicitly set one (savingsTargetSource !== 'fire').
+                  // When FIRE is driving the savings target, the FIRE Save
+                  // Target lines already cover this — drawing both would
+                  // double-up the same line.
+                  if (m.income.savingsTarget != null && m.income.savingsTargetSource !== 'fire') {
                     point.savingsTarget = m.income.savingsTarget;
                   }
                   return point;
@@ -881,18 +1033,19 @@ export default function CashFlow() {
                       if (name.startsWith('fire_') && fireMonthlyTargets) {
                         const scenId = name.replace('fire_', '');
                         const scen = fireMonthlyTargets.scenarios.find((s) => s.id === scenId);
-                        return [formatCurrency(value, 'INR'), scen?.name ?? 'FIRE Target'];
+                        return [formatCurrency(value, 'INR'), `${scen?.name ?? 'FIRE'} Save Target`];
                       }
-                      const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', savingsTarget: 'Savings Target' };
+                      const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Invested', savings: 'Saved (Income − Expenses)', savingsTarget: 'Savings Target' };
                       return [formatCurrency(value, 'INR'), labels[name] ?? name];
                     }}
                   />
                   <Legend formatter={(v) => {
                     if (v.startsWith('fire_') && fireMonthlyTargets) {
                       const scenId = v.replace('fire_', '');
-                      return fireMonthlyTargets.scenarios.find((s) => s.id === scenId)?.name ?? 'FIRE Target';
+                      const scen = fireMonthlyTargets.scenarios.find((s) => s.id === scenId);
+                      return `${scen?.name ?? 'FIRE'} Save Target`;
                     }
-                    const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Investment', savings: 'Savings', savingsTarget: 'Savings Target' };
+                    const labels: Record<string, string> = { income: 'Income', expenses: 'Expenses', investment: 'Invested', savings: 'Saved', savingsTarget: 'Savings Target' };
                     return labels[v] ?? v;
                   }} />
                   <Bar dataKey="income" fill="#6366f1" radius={[4, 4, 0, 0]} />
@@ -911,9 +1064,7 @@ export default function CashFlow() {
                       connectNulls
                     />
                   ))}
-                  {!fireMonthlyTargets && (
-                    <Line type="monotone" dataKey="savingsTarget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                  )}
+                  <Line type="monotone" dataKey="savingsTarget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -1502,7 +1653,7 @@ function AddSpendForm({ categories, paymentMethods, month }: {
   const [pmId, setPmId] = useState('');
   const [description, setDescription] = useState('');
   const [spendDate, setSpendDate] = useState(today);
-  const [spendType, setSpendType] = useState<'expense' | 'income'>('expense');
+  const [spendType, setSpendType] = useState<CashFlowCategoryType>('expense');
 
   const filteredCats = categories.filter((c) => c.type === spendType);
   const selectedCat = categories.find((c) => c.id === categoryId);
@@ -1530,6 +1681,11 @@ function AddSpendForm({ categories, paymentMethods, month }: {
           <button type="button" onClick={() => { setSpendType('income'); setCategoryId(''); }}
             className={clsx('text-xs px-2.5 py-1 rounded-md transition-colors', spendType === 'income' ? 'bg-green-500/20 text-green-400' : 'text-surface-400 hover:text-surface-200')}>
             Income
+          </button>
+          <button type="button" onClick={() => { setSpendType('transfer'); setCategoryId(''); }}
+            className={clsx('text-xs px-2.5 py-1 rounded-md transition-colors', spendType === 'transfer' ? 'bg-sky-500/20 text-sky-400' : 'text-surface-400 hover:text-surface-200')}
+            title="Reimbursement, money returned, wallet top-up — neither income nor expense">
+            Transfer
           </button>
         </div>
         <div>
@@ -1701,8 +1857,10 @@ function SpendLog({ spends: rawSpends, categories, paymentMethods, filterPmId }:
                   <td className="py-1.5 px-2 text-surface-300">{s.categoryName}</td>
                   <td className="py-1.5 px-2 text-surface-400">{s.paymentMethodName}</td>
                   <td className={clsx('py-1.5 px-2 text-right tabular-nums font-medium',
-                    s.type === 'income' ? 'text-green-400' : s.amount < 0 ? 'text-green-400' : 'text-surface-100')}>
-                    {s.type === 'income' ? '+' : ''}{s.amount < 0 ? '−' : ''}{formatCurrency(Math.abs(s.amount), 'INR')}
+                    s.type === 'income' ? 'text-green-400' :
+                    s.type === 'transfer' ? 'text-sky-400' :
+                    s.amount < 0 ? 'text-green-400' : 'text-surface-100')}>
+                    {s.type === 'income' ? '+' : s.type === 'transfer' ? '↻ ' : ''}{s.amount < 0 ? '−' : ''}{formatCurrency(Math.abs(s.amount), 'INR')}
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1896,13 +2054,27 @@ function CategoryModal({
   month: string;
 }) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<'income' | 'expense'>('expense');
+  const [type, setType] = useState<CashFlowCategoryType>('expense');
   const [tag, setTag] = useState<ExpenseTag>('need');
   const [budget, setBudget] = useState('');
 
   const createCategory = useCreateCategory();
   const deleteCategory = useDeleteCategory();
+  const updateCategory = useUpdateCategory();
   const initMonth = useInitMonth();
+
+  const handleTypeChange = (cat: CashFlowCategory, nextType: CashFlowCategoryType) => {
+    if (nextType === cat.type) return;
+    // Confirm because the cascade rewrites every existing spend's `type`
+    // column for this category. Reversible (just change back), but the
+    // user should know it'll move historical entries between buckets.
+    const ok = window.confirm(
+      `Change "${cat.name}" from ${cat.type} to ${nextType}?\n\n` +
+      `All existing entries in this category will be re-bucketed — they'll start counting toward ${nextType === 'transfer' ? 'Transfers' : nextType === 'income' ? 'Income' : 'Expenses'} instead of ${cat.type === 'income' ? 'Income' : cat.type === 'transfer' ? 'Transfers' : 'Expenses'}.`,
+    );
+    if (!ok) return;
+    updateCategory.mutate({ id: cat.id, type: nextType });
+  };
 
   const handleCreate = () => {
     if (!name.trim()) return;
@@ -1911,7 +2083,9 @@ function CategoryModal({
         name: name.trim(),
         type,
         tag: type === 'expense' ? tag : undefined,
-        defaultBudget: parseFloat(budget) || 0,
+        // Transfers don't have a meaningful "budget" since they cancel
+        // out — force 0 to avoid confusing the user later.
+        defaultBudget: type === 'transfer' ? 0 : (parseFloat(budget) || 0),
       },
       { onSuccess: () => initMonth.mutate(month) },
     );
@@ -1927,13 +2101,22 @@ function CategoryModal({
           {categories.map((cat) => (
             <div key={cat.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-surface-800/50">
               <div className="flex items-center gap-2">
-                <span className={clsx(
-                  'inline-block px-2 py-0.5 rounded-full text-xs font-medium',
-                  cat.type === 'income' ? 'bg-green-500/20 text-green-400' :
-                  cat.tag === 'need' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400',
-                )}>
-                  {cat.type === 'income' ? 'Income' : cat.tag === 'need' ? 'Need' : 'Luxury'}
-                </span>
+                <select
+                  value={cat.type}
+                  onChange={(e) => handleTypeChange(cat, e.target.value as CashFlowCategoryType)}
+                  disabled={updateCategory.isPending}
+                  title="Change category type — cascades to all existing entries in this category"
+                  className={clsx(
+                    'px-2 py-0.5 rounded-full text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-brand-500',
+                    cat.type === 'income' ? 'bg-green-500/20 text-green-400' :
+                    cat.type === 'transfer' ? 'bg-sky-500/20 text-sky-400' :
+                    cat.tag === 'need' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400',
+                  )}
+                >
+                  <option value="expense" className="bg-surface-800 text-surface-100">{cat.type === 'expense' ? (cat.tag === 'need' ? 'Need' : 'Luxury') : 'Expense'}</option>
+                  <option value="income" className="bg-surface-800 text-surface-100">Income</option>
+                  <option value="transfer" className="bg-surface-800 text-surface-100">Transfer</option>
+                </select>
                 <span className="text-surface-200 text-sm">{cat.name}</span>
                 {cat.defaultBudget ? (
                   <span className="text-surface-500 text-xs">({formatCurrency(cat.defaultBudget, 'INR')})</span>
@@ -1973,11 +2156,12 @@ function CategoryModal({
           <div className="flex items-center gap-3">
             <select
               value={type}
-              onChange={(e) => setType(e.target.value as 'income' | 'expense')}
+              onChange={(e) => setType(e.target.value as CashFlowCategoryType)}
               className="px-3 py-2 rounded-lg text-sm bg-surface-800 border border-surface-700 text-surface-100 focus:outline-none focus:border-brand-500"
             >
               <option value="expense">Expense</option>
               <option value="income">Income</option>
+              <option value="transfer">Transfer (reimbursement, money returned)</option>
             </select>
             {type === 'expense' && (
               <select

@@ -35,7 +35,7 @@ import {
 } from 'recharts';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
-import { formatCurrency, todayLocal } from '../lib/format';
+import { formatCurrency, formatLakhCrore, todayLocal } from '../lib/format';
 import {
   useFireSimulations,
   useFireCompare,
@@ -63,11 +63,9 @@ const SCENARIO_COLORS: Record<number, string> = {
 const ACTUAL_COLOR = '#ef4444';
 const scenarioColor = (i: number) => SCENARIO_COLORS[i] ?? SCENARIO_COLORS[i % 5];
 
-function fmtLakh(v: number): string {
-  if (Math.abs(v) >= 10000000) return `${(v / 10000000).toFixed(2)} Cr`;
-  if (Math.abs(v) >= 100000) return `${(v / 100000).toFixed(1)} L`;
-  return formatCurrency(v, 'INR');
-}
+// Local alias so existing call sites keep working; shared impl lives in
+// lib/format so the cash-flow FIRE pills format consistently.
+const fmtLakh = formatLakhCrore;
 function pctDisplay(v: number) { return `${(v * 100).toFixed(1)}%`; }
 function getCorpusAtRetirement(rows: FireSimulationRow[]) {
   const r = rows.find((r) => r.status === 'retired_here');
@@ -543,7 +541,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
           {baseScenario && (
             <div className="grid grid-cols-3 gap-3 mb-5">
               <div className="rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2.5">
-                <div className="text-[10px] text-surface-500 uppercase tracking-wide mb-1">Savings Target</div>
+                <div className="text-[10px] text-surface-500 uppercase tracking-wide mb-1">Investment Target</div>
                 <div className="text-lg font-bold text-blue-400 tabular-nums">{fmtLakh(baseInvTarget)}<span className="text-xs text-surface-500 font-normal"> /mo</span></div>
                 {usdToInr && <div className="text-[10px] text-surface-500">{fmtUsd(baseInvTarget, usdToInr)}/mo</div>}
                 <div className="text-[10px] text-surface-500 mt-0.5">{baseScenario.name}</div>
@@ -588,7 +586,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                     if (v == null) return ['—', name];
                     const labels: Record<string, string> = {
                       income: 'Income',
-                      investmentTarget: 'Savings Target',
+                      investmentTarget: 'Investment Target',
                       expenditureTarget: 'Exp. Budget',
                       actualInvestment: 'Saved',
                       actualExpenditure: 'Actual Expenditure',
@@ -600,7 +598,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                 <Legend
                   formatter={(v: string) => ({
                     income: 'Income',
-                    investmentTarget: 'Savings Target',
+                    investmentTarget: 'Investment Target',
                     expenditureTarget: 'Exp. Budget',
                     actualInvestment: 'Saved',
                     actualExpenditure: 'Actual Expenditure',
@@ -621,7 +619,7 @@ function MonthlyProgress({ data, usdToInr }: { data: FireMonthlyTargetData; usdT
                 <tr className="border-b border-surface-800">
                   <th className="py-2 px-2 text-left text-surface-500 font-medium">Month</th>
                   <th className="py-2 px-2 text-right text-purple-400 font-medium">Income</th>
-                  <th className="py-2 px-2 text-right text-blue-400 font-medium">Savings Target</th>
+                  <th className="py-2 px-2 text-right text-blue-400 font-medium">Investment Target</th>
                   <th className="py-2 px-2 text-right text-green-400 font-medium">Saved</th>
                   <th className="py-2 px-2 text-right text-amber-400 font-medium">Exp. Budget</th>
                   <th className="py-2 px-2 text-right text-surface-300 font-medium">Actual Exp.</th>
@@ -942,7 +940,13 @@ function ScenarioCard({ sim, idx, isActive, usdToInr, onSelect, onSave, onDelete
         <div>
           <div className="text-[10px] text-surface-500 mb-0.5">Retire at</div>
           <div className="text-lg font-bold tabular-nums text-surface-100">{s.retirementAge}</div>
-          <div className="text-[10px] text-surface-500">{s.retirementAge - s.currentAge > 0 ? `${s.retirementAge - s.currentAge}y from now` : 'Now'}</div>
+          <div className="text-[10px] text-surface-500">
+            {sim.earliestRetirementAge < s.retirementAge ? (
+              <span className="text-green-400">FIRE possible @ {sim.earliestRetirementAge}</span>
+            ) : (
+              s.retirementAge - s.currentAge > 0 ? `${s.retirementAge - s.currentAge}y from now` : 'Now'
+            )}
+          </div>
         </div>
         <div>
           <div className="text-[10px] text-surface-500 mb-0.5">Corpus</div>

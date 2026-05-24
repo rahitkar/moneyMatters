@@ -202,7 +202,7 @@ export default function Help() {
                       <Landmark className="w-4 h-4 text-blue-400" /> Month End
                     </h3>
                     <div className="space-y-2 ml-6">
-                      <Step n={9}><p>Review the <strong className="text-surface-200">Bank Waterfall</strong> on Cash Flow — it shows Opening + Income − Expenses − CC Bill − Investment = Savings.</p></Step>
+                      <Step n={9}><p>Review the <strong className="text-surface-200">Bank Waterfall</strong> on Cash Flow — it shows Opening + Income + Transfers In − Cash/UPI Expenses − Investment Transfers − Wallet Transfers − Net CC Bill = Savings.</p></Step>
                       <Step n={10}><p>Check target progress bars. Generate a <NavChip to="/reports" label="Report" /> for the month.</p></Step>
                     </div>
                   </div>
@@ -386,6 +386,108 @@ export default function Help() {
                   <h3 className="text-surface-200 font-medium mb-2">Billing Cycle</h3>
                   <p>If your salary cycle is 25th-to-25th, set the cycle start day to 26 in Settings. All expense dates are automatically bucketed into the correct cycle month.</p>
                 </div>
+
+                <div className="pt-2 border-t border-surface-700/50">
+                  <h3 className="text-surface-200 font-medium mb-2 flex items-center gap-2">
+                    <Flame className="w-4 h-4 text-orange-400" /> FIRE Integration
+                  </h3>
+                  <p className="mb-3">
+                    The cash-flow page connects directly to your <NavChip to="/fire" label="FIRE" /> plan, surfacing three things below the StatCards. They appear automatically once you have at least one FIRE scenario set up.
+                  </p>
+
+                  <Accordion title="FIRE Status (two-row pill)" defaultOpen>
+                    <p className="mb-2">
+                      The FIRE Status card shows two complementary views, each with one pill per scenario. Together they answer "am I doing the right thing this month?" AND "am I where I should be overall?".
+                    </p>
+                    <p className="text-surface-200 font-medium mt-3 mb-1">Row 1 — This month's saving</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Shows whether your <strong className="text-surface-200">savings</strong> for the selected month — i.e. <em>income − expenses</em> — is ahead of or behind that scenario's required monthly saving.</li>
+                      <li>Compares <strong className="text-surface-200">income minus expenses</strong>, not money actually moved into the market. Some months you'll invest a lump sum, some months you'll hold cash; what matters for FIRE is that the money is set aside.</li>
+                      <li>"+₹5,000 ahead" = you saved ₹5,000 more than that scenario expects this month.</li>
+                    </ul>
+                    <p className="text-surface-200 font-medium mt-3 mb-1">Row 2 — Corpus to date</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Shows whether your <strong className="text-surface-200">total portfolio value</strong> at this point in time is ahead of or behind each scenario's interpolated month-end corpus target.</li>
+                      <li>Captures cumulative progress — past savings, returns, market moves — that the per-month view misses. You can be a great saver this month but still behind on corpus because of a previous slump (or vice versa).</li>
+                      <li>"No snapshot yet" appears when there's no portfolio snapshot for the selected month — the price-update scheduler creates these automatically once a day, so you'll usually see data for the current month.</li>
+                    </ul>
+                    <p className="mt-3 mb-1 text-surface-300"><strong>Why both?</strong> The monthly view tells you about your <em>habits</em> right now. The corpus view tells you about your <em>position</em>. Either alone is half the picture — both together let you make informed decisions.</p>
+                    <p className="text-[11px] text-surface-500 mt-2">
+                      The "(driving Savings Target)" tag appears next to whichever scenario is anchoring your auto-derived savings target (see below).
+                    </p>
+                    <p className="text-[11px] text-surface-500">
+                      <strong className="text-surface-300">Caveat on Row 1</strong>: it assumes the cash you save is genuinely earmarked for investment. If you're saving for a vacation, that money still shows here as "ahead of FIRE" but won't actually compound.
+                    </p>
+                  </Accordion>
+
+                  <Accordion title="What-If: FIRE Impact of One Month's Saving">
+                    <p className="mb-2">
+                      A collapsible panel that asks: <em>"If I save ₹X this month instead of my plan's baseline, how does retirement shift?"</em>
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 mb-2">
+                      <li>Click the panel to expand it.</li>
+                      <li>Type the hypothetical amount you'd <strong className="text-surface-200">save</strong> (income − expenses) this single month. The placeholder pre-fills with your actual saved amount.</li>
+                      <li>Click <em>Simulate</em>.</li>
+                      <li>You get one card per scenario showing:
+                        <ul className="list-disc list-inside space-y-0.5 mt-1 ml-3">
+                          <li><strong className="text-surface-200">Corpus impact</strong> — the future-value of the one-month delta at the post-tax effective return, by retirement age.</li>
+                          <li><strong className="text-surface-200">Earliest retirement</strong> — the new earliest possible retirement age, with "X years earlier / later" relative to the unmodified plan.</li>
+                          <li><strong className="text-surface-200">Plan baseline this month</strong> — what your FIRE plan expects you to save this FY (monthly saving × annual savings increase compounded).</li>
+                          <li><strong className="text-surface-200">One-month delta</strong> — the difference between what you typed and the baseline.</li>
+                        </ul>
+                      </li>
+                    </ol>
+                    <div className="bg-surface-800/50 rounded-lg p-3 flex items-start gap-2 mt-2">
+                      <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-surface-400">
+                        <strong className="text-surface-200">Important:</strong> The model treats the input as a single month's saving — not a permanent change. Saving ₹50k more <em>once</em> is a one-time corpus bump that compounds for the years until you retire. To see the effect of permanently saving more, edit the scenario's <em>Monthly Saving</em> on the FIRE page instead.
+                      </p>
+                    </div>
+                    <p className="mt-2">The panel state resets automatically when you change months, so February's hypothetical never bleeds into March.</p>
+                  </Accordion>
+
+                  <Accordion title="Auto-derived Savings Target">
+                    <p className="mb-2">
+                      If you don't set a manual <strong className="text-surface-200">Savings Target</strong> for the month, the cash-flow page uses your Base FIRE scenario's monthly investment target for the current FY. The yearly trend chart shows this as a dashed FIRE-colored line.
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>To override it, click the config bar at the top and enter a manual <em>Savings Target</em>. The "(driving Savings Target)" pill tag will disappear.</li>
+                      <li>If the FIRE plan starts in a future year (e.g. you're modeling a plan that begins 2027), the auto-derivation skips silently and no target line is drawn until then.</li>
+                    </ul>
+                  </Accordion>
+
+                  <Accordion title="Yearly Trend Chart Lines">
+                    <p className="mb-1">The yearly chart shows up to four bars and two dashed lines per month:</p>
+                    <ul className="list-disc list-inside space-y-1 mt-1">
+                      <li><strong className="text-surface-200">Income</strong>, <strong className="text-surface-200">Expenses</strong>, <strong className="text-surface-200">Invested</strong>, <strong className="text-surface-200">Saved</strong> (= Income − Expenses) — bars.</li>
+                      <li><strong className="text-surface-200">FIRE Save Target</strong> — one dashed line per FIRE scenario, showing the monthly saving target the corpus plan needs. Compare against the <em>Saved</em> bar.</li>
+                      <li><strong className="text-surface-200">Savings Target</strong> — a green dashed line, only when you've set a manual target (it's hidden when the target is auto-derived from FIRE, since the FIRE line already shows that information).</li>
+                    </ul>
+                  </Accordion>
+
+                  <Accordion title="Transfer category type (reimbursements, money returned)">
+                    <p className="mb-2">
+                      A third category type beyond Income and Expense, for money movements that aren't real income — reimbursements landing back in your account, a friend returning money you lent, wallet top-ups, salary advances being repaid.
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 mb-2">
+                      <li>Open the <strong className="text-surface-200">Manage Categories</strong> modal (settings/cog icon at the top of Cash Flow).</li>
+                      <li>Pick <strong className="text-surface-200">Transfer (reimbursement, money returned)</strong> from the type dropdown when adding a category. Examples: "Reimbursement", "Wallet Top-up", "Money Returned".</li>
+                      <li>When logging the inflow, switch the spend form's toggle from <em>Expense</em> / <em>Income</em> to <em>Transfer</em>, pick your transfer category and the payment method that received it.</li>
+                      <li><strong className="text-surface-200">To re-classify existing entries</strong>: open Manage Categories and click the type pill next to any category — it's a dropdown. Changing it cascades to every existing spend in that category in one shot.</li>
+                    </ol>
+                    <p className="mb-2"><strong className="text-surface-200">Why a separate type?</strong> The original expense (the dinner you paid for, the loan you gave) <em>was</em> a real expense and stays counted as one. When the money comes back, logging it as Income would inflate your income figures and make the FIRE Savings comparison look better than reality. Transfer keeps the books honest:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Excluded from <strong className="text-surface-200">Income</strong>, <strong className="text-surface-200">Expenses</strong>, and the FIRE <em>Saved</em> denominator.</li>
+                      <li>Tracked in a separate <strong className="text-surface-200">Transfers</strong> StatCard (only renders when the month has at least one transfer).</li>
+                      <li>Visible in the Spend Log with a sky-blue ↻ marker to distinguish from income/expense rows.</li>
+                    </ul>
+                    <p className="mb-2 mt-3"><strong className="text-surface-200">How transfers affect the Bank Waterfall:</strong> the payment method tells us where the money landed, mirroring how expenses split between bank and CC.</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Transfer paid via <em>Bank Transfer / UPI / Cash / Debit Card</em> → adds to the bank balance under <strong className="text-surface-200">Transfers In</strong> (sky-blue + line). Example: Avi sends ₹20,000 to your bank → bank +₹20,000.</li>
+                      <li>Transfer paid via <em>Credit Card</em> → reduces the credit card bill. The CC row in the waterfall shows the net (gross spends − transfer credits), so when you click <em>Pay Bill</em>, you're only debiting the actual amount owed. Example: Ansul sends ₹3,538 directly to your CC → CC bill drops by ₹3,538.</li>
+                    </ul>
+                  </Accordion>
+                </div>
               </div>
             </Card>
           )}
@@ -479,17 +581,27 @@ export default function Help() {
                 <Flame className="w-5 h-5 text-brand-400" /> FIRE Simulator
               </h2>
               <div className="space-y-4 text-sm text-surface-400 leading-relaxed">
-                <p>The <NavChip to="/fire" label="FIRE" /> (Financial Independence, Retire Early) page helps you plan for retirement.</p>
+                <p>The <NavChip to="/fire" label="FIRE" /> (Financial Independence, Retire Early) page helps you plan for retirement, and the planner now feeds directly into your monthly <NavChip to="/cash-flow" label="Cash Flow" />.</p>
 
                 <div>
                   <h3 className="text-surface-200 font-medium mb-2">Scenarios</h3>
-                  <p>Create multiple scenarios (e.g. Base FIRE, Lean FIRE, Fat FIRE) with different parameters:</p>
+                  <p>Create multiple scenarios with different parameters:</p>
                   <ul className="list-disc list-inside space-y-1 mt-1">
                     <li>Retirement age, life expectancy</li>
                     <li>Monthly savings, annual savings increase rate</li>
                     <li>Expected return on investment, capital gains tax</li>
                     <li>Post-retirement monthly expenses, inflation rate</li>
                   </ul>
+                  <p className="mt-2">
+                    <strong className="text-surface-200">Base FIRE</strong>, <strong className="text-surface-200">Lean FIRE</strong>, and <strong className="text-surface-200">Fat FIRE</strong> are reserved scenario names — they cannot be renamed because the cash-flow page uses the <em>Base FIRE</em> scenario as the anchor for monthly investment targets. You can still edit every other field, delete them, and add custom scenarios alongside.
+                  </p>
+                </div>
+
+                <div>
+                  <h3 className="text-surface-200 font-medium mb-2">Earliest Retirement Age</h3>
+                  <p>
+                    Each scenario card now shows <strong className="text-surface-200">FIRE possible @ N</strong> in green when your projected corpus would actually let you retire earlier than the planned age. The number is the lowest age at which retiring still keeps funds positive through life expectancy, given the scenario's returns, inflation, and post-retirement expenses.
+                  </p>
                 </div>
 
                 <div>
@@ -504,6 +616,13 @@ export default function Help() {
                 <div>
                   <h3 className="text-surface-200 font-medium mb-2">How It Uses Your Data</h3>
                   <p>The FIRE tracker reads your actual income from cash flow entries and actual investments from transaction data. It compares these against your scenario targets to show if you're on track, ahead, or behind.</p>
+                </div>
+
+                <div className="bg-surface-800/50 rounded-lg p-3 flex items-start gap-2 mt-2">
+                  <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-surface-400">
+                    <strong className="text-surface-200">Investment Target vs Savings Target:</strong> Investment Target is what your FIRE plan needs you to <em>invest</em> per month (it grows at your expected ROI). Savings Target is a broader cash-savings goal (what's left after expenses). The cash flow page shows both clearly — they are different concepts.
+                  </p>
                 </div>
               </div>
             </Card>

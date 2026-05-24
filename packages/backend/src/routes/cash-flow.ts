@@ -6,7 +6,7 @@ const monthSchema = z.string().regex(/^\d{4}-\d{2}$/);
 
 const createCategorySchema = z.object({
   name: z.string().min(1),
-  type: z.enum(['income', 'expense']),
+  type: z.enum(['income', 'expense', 'transfer']),
   tag: z.enum(['need', 'luxury']).optional(),
   defaultBudget: z.number().min(0).optional(),
   sortOrder: z.number().optional(),
@@ -14,6 +14,7 @@ const createCategorySchema = z.object({
 
 const updateCategorySchema = z.object({
   name: z.string().min(1).optional(),
+  type: z.enum(['income', 'expense', 'transfer']).optional(),
   tag: z.enum(['need', 'luxury']).optional(),
   defaultBudget: z.number().min(0).optional(),
   sortOrder: z.number().optional(),
@@ -52,7 +53,7 @@ const addSpendSchema = z.object({
   amount: z.number(),
   description: z.string().optional(),
   spendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  type: z.enum(['expense', 'income']),
+  type: z.enum(['expense', 'income', 'transfer']),
 });
 
 const updateSpendSchema = z.object({

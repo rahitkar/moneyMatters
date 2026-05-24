@@ -282,7 +282,10 @@ export interface RealizedGain {
 
 // ── Cash Flow ──────────────────────────────────────────────────────
 
-export type CashFlowCategoryType = 'income' | 'expense';
+// 'transfer' = neither income nor expense — e.g. reimbursement returning,
+// wallet top-up, friend returning money. Excluded from income/expense/savings
+// totals; tracked separately as `totalTransfers`.
+export type CashFlowCategoryType = 'income' | 'expense' | 'transfer';
 export type ExpenseTag = 'need' | 'luxury';
 
 export interface CashFlowCategory {
@@ -330,7 +333,10 @@ export interface InvestmentRow {
   name: string;
   symbol: string;
   currency: string;
+  /** Native-currency amount (USD for foreign assets, INR for Indian). */
   amount: number;
+  /** INR-converted amount used by all sums and the cash-flow waterfall. */
+  amountInr: number;
   foreignQuantity: number | null;
 }
 
@@ -383,9 +389,10 @@ export interface CashFlowMonthSummary {
     investmentTarget: number | null;
     savingsTarget: number | null;
     savingsTargetSource: 'manual' | 'fire' | null;
-    fireScenarioTargets: { id: string; name: string; monthlySaving: number }[];
   };
   expenses: ExpenseRow[];
+  transfers: IncomeRow[];
+  transferSpends: CashFlowSpend[];
   investments: InvestmentRow[];
   spends: CashFlowSpend[];
   paymentMethodBreakdown: PaymentMethodBreakdownRow[];
@@ -393,7 +400,11 @@ export interface CashFlowMonthSummary {
     openingBalance: number | null;
     totalIncome: number;
     cashUpiExpenses: number;
+    /** Net CC bill = ccGrossExpenses − ccTransferCredits. What you actually owe. */
     ccBillTotal: number;
+    ccGrossExpenses: number;
+    ccTransferCredits: number;
+    cashUpiTransfersIn: number;
     totalInvested: number;
     bankInvestments: number;
     walletTransfers: number;
@@ -408,6 +419,9 @@ export interface CashFlowMonthSummary {
     totalNeed: number;
     totalLuxury: number;
     totalInvested: number;
+    totalTransfers: number;
+    cashUpiTransfersIn: number;
+    ccTransferCredits: number;
     bankInvestments: number;
     walletTransfers: number;
     netSavings: number;
@@ -511,6 +525,7 @@ export interface FireSimulationResult {
   fireAge: number;
   corpusAtRetirement: number;
   fundsLastUntilAge: number;
+  earliestRetirementAge: number;
 }
 
 export interface FireLiveProgress {
@@ -550,9 +565,28 @@ export interface FireMonthlyTargetData {
 export interface FireWhatIfScenario {
   id: string;
   name: string;
-  original: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
-  adjusted: { retirementAge: number; corpusAtRetirement: number; monthlySaving: number };
-  delta: { retirementAgeShift: number; corpusDelta: number };
+  original: {
+    retirementAge: number;
+    corpusAtRetirement: number;
+    monthlySaving: number;
+    earliestRetirementAge: number;
+  };
+  adjusted: {
+    retirementAge: number;
+    corpusAtRetirement: number;
+    monthlySaving: number;
+    earliestRetirementAge: number;
+  };
+  /**
+   * `retirementAgeShift` is positive when extra saving pulls earliest
+   * retirement earlier (good), negative when saving less pushes it later.
+   * `savingDelta` is the one-month difference vs the FIRE plan baseline.
+   */
+  delta: {
+    retirementAgeShift: number;
+    corpusDelta: number;
+    savingDelta: number;
+  };
 }
 
 export interface FireWhatIfResult {
