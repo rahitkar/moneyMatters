@@ -184,7 +184,10 @@ export const marketDataService = {
   },
 
   async updateAllPrices(): Promise<{ updated: number; failed: number }> {
-    exchangeRateProvider.invalidateRate('USD', 'INR');
+    // Warm the FX cache once before the per-provider loops fan out, but
+    // don't invalidate first — the 24h TTL is already fine-grained enough
+    // for price refreshes, and force-purging burns a Yahoo crumb call on
+    // every refresh which we'd rather save for actual equity quotes.
     await exchangeRateProvider.getRate('USD', 'INR');
 
     const assets = await db.select().from(schema.assets);
