@@ -284,22 +284,24 @@ export const marketDataService = {
       }
     }
 
-    // Indian mutual funds: NAV from mfapi.in, previousClose from Yahoo
+    // Indian mutual funds: NAV (and previous-day NAV for day-change) from
+    // mfapi.in. We deliberately do NOT call Yahoo Finance here — Indian MF
+    // symbols stored by us are full fund names or ISINs (e.g. "QUANT SMALL CAP
+    // FUND - DIRECT PLAN.NS", "INF846K01CX4") that never resolve on Yahoo.
+    // Those guaranteed 404s used to burn the crumb-endpoint rate-limit budget
+    // and cascade "Failed to get crumb" errors onto every other quote in the
+    // run. mfapi.in returns both today's NAV and the prior trading day's NAV,
+    // which we use as previousClose for day-change calculations.
     const mfManual = assets.filter((a) => isMfClass(a.assetClass));
-    const mfSymbols = [...new Set(mfManual.map((a) => a.symbol).filter(Boolean))];
-    const mfYahooQuotes = mfSymbols.length > 0
-      ? await yahooFinanceProvider.getQuotes(mfSymbols)
-      : new Map<string, import('../providers/yahoo-finance.provider.js').QuoteResult>();
     for (const asset of mfManual) {
       try {
-        const nav = await indiaMfNavProvider.fetchLatestNav({
+        const result = await indiaMfNavProvider.fetchRecentNavs({
           isin: asset.isin ?? null,
           name: asset.name,
           symbol: asset.symbol,
         });
-        if (nav !== null) {
-          const yahooQuote = mfYahooQuotes.get(asset.symbol);
-          await assetService.updatePrice(asset.id, nav, undefined, yahooQuote?.previousClose);
+        if (result !== null) {
+          await assetService.updatePrice(asset.id, result.nav, undefined, result.previousNav);
           updated++;
         } else {
           failed++;

@@ -99,6 +99,39 @@ async function getLatest(schemeCode: number): Promise<LatestParsed | null> {
   return parseLatestResponse(schemeCode, body);
 }
 
+interface NavPair {
+  nav: number;
+  previousNav?: number;
+}
+
+/**
+ * Fetch the two most recent NAVs in a single call. Used after we've already
+ * matched a scheme — the full-history endpoint is heavier than `/latest` so
+ * we only hit it once per asset per refresh, not for every candidate during
+ * the discovery scan.
+ */
+async function getRecentNavPair(schemeCode: number): Promise<NavPair | null> {
+  await throttle();
+  const res = await fetch(`${BASE}/${schemeCode}`);
+  if (!res.ok) return null;
+  const body = (await res.json()) as unknown;
+  if (!body || typeof body !== 'object') return null;
+  const b = body as {
+    status?: string;
+    data?: Array<{ date?: string; nav?: string }>;
+  };
+  if (b.status !== 'SUCCESS' || !Array.isArray(b.data) || b.data.length === 0) return null;
+
+  const nav = parseFloat(String(b.data[0]?.nav ?? ''));
+  if (!Number.isFinite(nav) || nav <= 0) return null;
+
+  const prevRaw = b.data[1]?.nav;
+  const prevNum = prevRaw != null ? parseFloat(String(prevRaw)) : NaN;
+  const previousNav = Number.isFinite(prevNum) && prevNum > 0 ? prevNum : undefined;
+
+  return { nav, previousNav };
+}
+
 function nameMatchScore(assetName: string, schemeName: string): number {
   const a = new Set(
     expandCompoundWords(normalizeFundLabel(assetName))
@@ -164,22 +197,35 @@ function searchQueriesFromName(name: string, hasIsin: boolean): string[] {
 
 const isinSchemeCache = new Map<string, number>();
 
+async function pairFromMatch(schemeCode: number, fallbackNav: number): Promise<NavPair> {
+  // After we've identified the right scheme, do one full-history fetch to grab
+  // today's + yesterday's NAV. If that fails for any reason we still return
+  // the latest NAV we already have, just without previousNav.
+  const pair = await getRecentNavPair(schemeCode);
+  if (pair) return pair;
+  return { nav: fallbackNav };
+}
+
 export const indiaMfNavProvider = {
   mfTargetIsin,
 
-  /** @internal */
-  async fetchLatestNav(params: {
+  /**
+   * Fetch the latest NAV (and the previous trading day's NAV when available)
+   * for an Indian mutual fund. Returns null if the fund cannot be matched.
+   * @internal
+   */
+  async fetchRecentNavs(params: {
     isin?: string | null;
     name: string;
     symbol: string;
-  }): Promise<number | null> {
+  }): Promise<NavPair | null> {
     const target = mfTargetIsin(params.isin, params.symbol);
 
     if (target && isinSchemeCache.has(target)) {
       const cachedCode = isinSchemeCache.get(target)!;
       const latest = await getLatest(cachedCode);
       if (latest?.isins.includes(target)) {
-        return latest.nav;
+        return pairFromMatch(cachedCode, latest.nav);
       }
       isinSchemeCache.delete(target);
     }
@@ -204,7 +250,7 @@ export const indiaMfNavProvider = {
 
         if (target && latest.isins.includes(target)) {
           isinSchemeCache.set(target, hit.schemeCode);
-          return latest.nav;
+          return pairFromMatch(hit.schemeCode, latest.nav);
         }
 
         if (!target) {
@@ -219,13 +265,14 @@ export const indiaMfNavProvider = {
 
     if (!target) {
       if (noIsinCandidates.length === 1) {
-        return noIsinCandidates[0].nav;
+        const c = noIsinCandidates[0];
+        return pairFromMatch(c.schemeCode, c.nav);
       }
       if (noIsinCandidates.length > 0) {
         noIsinCandidates.sort((a, b) => b.score - a.score);
         const best = noIsinCandidates[0];
         if (best.score >= 0.35) {
-          return best.nav;
+          return pairFromMatch(best.schemeCode, best.nav);
         }
       }
     }
