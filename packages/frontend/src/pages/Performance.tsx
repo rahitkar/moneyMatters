@@ -818,12 +818,13 @@ interface PeriodBreakdownCardProps {
   usdToInr: number | null;
 }
 
-// Period-scoped waterfall answering four questions: starting value,
-// ending value, real return, and money flow. Real return uses the
-// time-weighted NAV return (already on PortfolioPerformance) so it's
-// not biased by mid-period contributions. Buys and sells are shown as
-// separate fixed-sign rows so the labels never flip on you. Both rows
-// are expandable to the underlying transactions.
+// Period breakdown — five plain-rupee numbers: starting value, ending
+// value, real return, buys (money in), sells (money out). Buys and
+// sells are scoped to investment assets only — bank, EPF, FD, lended,
+// and similar bookkeeping movements are not counted (they live on the
+// Cash Flow page). The numbers do not sum to total value change; the
+// residual is your cash flow activity. Buys and sells are expandable
+// to the underlying transactions for traceability.
 function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreakdownCardProps) {
   const {
     periodStartValue,
@@ -832,7 +833,6 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
     periodSells,
     periodMarketGain,
     periodContributionTxs,
-    percentageReturn, // NAV-based, time-weighted; the honest "real return"
   } = portfolio;
   const [buysExpanded, setBuysExpanded] = useState(false);
   const [sellsExpanded, setSellsExpanded] = useState(false);
@@ -982,20 +982,12 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
 
   return (
     <Card>
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-semibold text-surface-100">Period Breakdown</h2>
-          <p className="text-xs text-surface-500 mt-0.5">
-            Starting value, ending value, real return, and money flow over {intervalLabel}
-          </p>
-        </div>
-        <div
-          className={clsx('text-right', percentageReturn >= 0 ? 'text-green-400' : 'text-red-400')}
-          title="Time-weighted (NAV) return — independent of how much or when you contributed"
-        >
-          <div className="text-xs text-surface-500">Real return</div>
-          <div className="text-lg font-semibold tabular-nums">{formatPercent(percentageReturn)}</div>
-        </div>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-surface-100">Period Breakdown</h2>
+        <p className="text-xs text-surface-500 mt-0.5">
+          Starting and ending value, real market return, and investment buys/sells over {intervalLabel}.
+          Bank movements, salary, and expenses are tracked on the Cash Flow page.
+        </p>
       </div>
 
       <div className="px-1">
@@ -1006,6 +998,13 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
           tone="neutral"
           hint={`as of ${formatDate(portfolio.startDate)}`}
         />
+        <PlainRow
+          label={periodMarketGain >= 0 ? 'Real return (market gain)' : 'Real return (market loss)'}
+          value={periodMarketGain}
+          sign={periodMarketGain >= 0 ? '+' : '−'}
+          tone={periodMarketGain >= 0 ? 'gain' : 'loss'}
+          hint="how much your existing investments actually grew or shrank, based on time-weighted return"
+        />
         <ExpandableFlowRow
           label="Buys this period"
           amount={periodBuys}
@@ -1014,7 +1013,7 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
           txs={buyTxs}
           expanded={buysExpanded}
           onToggle={() => setBuysExpanded((v) => !v)}
-          emptyHint="no buys in this window"
+          emptyHint="no investment buys in this window"
         />
         <ExpandableFlowRow
           label="Sells this period"
@@ -1024,14 +1023,7 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
           txs={sellTxs}
           expanded={sellsExpanded}
           onToggle={() => setSellsExpanded((v) => !v)}
-          emptyHint="no sells in this window"
-        />
-        <PlainRow
-          label={periodMarketGain >= 0 ? 'Market gain' : 'Market loss'}
-          value={periodMarketGain}
-          sign={periodMarketGain >= 0 ? '+' : '−'}
-          tone={periodMarketGain >= 0 ? 'gain' : 'loss'}
-          hint="how much your existing holdings actually grew or shrank"
+          emptyHint="no investment sells in this window"
         />
         <PlainRow
           label="Current value"

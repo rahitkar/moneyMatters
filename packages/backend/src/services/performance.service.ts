@@ -60,29 +60,33 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   currentNAV: number;
   totalUnits: number;
   /**
-   * Period-scoped breakdown — the answer to "what is my actual profit
-   * over this window vs. money I put in". The identity holds:
-   *   periodEndValue − periodStartValue = periodContributions + periodMarketGain
-   * `periodContributions` is the net money entering the tracked-investment
-   * universe from the primary bank within the window (bank-funded buys
-   * and wallet top-ups, minus sells whose proceeds returned to bank).
-   * Dividends/interest credits and intra-portfolio rebalancing are
-   * excluded — they are not user contributions.
+   * Period-scoped breakdown answering five plain-rupee questions:
+   * starting value, ending value, real return, buys (money in), sells
+   * (money out). Buys and sells are scoped to *investment* assets only
+   * — cash, bank, EPF, FD, lended, external_portfolio movements are
+   * not counted (those are bookkeeping handled in Cash Flow). Dividend
+   * credits with no fund source are also excluded.
+   *
+   * `periodMarketGain` is derived from the time-weighted NAV return
+   * applied to the starting value — i.e. real market performance,
+   * unaffected by contribution size/timing. The five numbers do NOT
+   * sum to the total value change; the residual is cash-flow activity
+   * (salary, expenses, transfers) which is shown on the Cash Flow page.
    */
   periodStartValue: number;
   periodEndValue: number;
-  /** Net new money into the segment (buys − sells, INR, current FX).
-   *  Kept for any caller still using the combined number. */
+  /** Net new money into investments: periodBuys − periodSells. */
   periodContributions: number;
-  /** Sum of qualifying buys (always ≥ 0) over the period, INR. */
+  /** Sum of investment-asset buys (always ≥ 0), INR. Excludes cash
+   *  movements and unsourced credits like dividends. */
   periodBuys: number;
-  /** Sum of qualifying sells (always ≥ 0) over the period, INR. */
+  /** Sum of investment-asset sells (always ≥ 0), INR. Excludes cash
+   *  withdrawals and expenses. */
   periodSells: number;
-  /** Real return in rupees: endValue − startValue − buys + sells. */
+  /** Real market gain in rupees: startValue × (navReturn / 100). */
   periodMarketGain: number;
-  /** Per-transaction backing for both buys and sells. Filter by
-   *  `tx.type` to reconstruct each side. `signedInr > 0` for buys,
-   *  `signedInr < 0` for sells. */
+  /** Per-transaction backing for buys (signedInr > 0) and sells
+   *  (signedInr < 0). Filter by `tx.type` to render each side. */
   periodContributionTxs: PeriodContributionTx[];
 }
 
@@ -186,6 +190,24 @@ export interface PeriodContributionTx {
   signedInr: number;
 }
 
+/**
+ * Asset classes that represent cash-side balances rather than market
+ * investments. Transactions on these assets are bookkeeping moves
+ * (salary credits, expenses, transfers between accounts, employer
+ * contributions, money lent to friends) and don't represent buying or
+ * selling investments. The Performance page's "Buys / Sells this
+ * period" excludes them; they belong in the Cash Flow page instead.
+ */
+const CASH_LIKE_ASSET_CLASSES = new Set<string>([
+  'cash',
+  'lended',
+  'fixed_deposit',
+  'ppf',
+  'epf',
+  'bonds',
+  'external_portfolio',
+]);
+
 async function computePeriodContributions(
   userId: string,
   startDateStr: string,
@@ -193,28 +215,32 @@ async function computePeriodContributions(
   segmentAssetIds: Set<string> | null,
   usdToInr: number | null,
 ): Promise<{
-  total: number;
   buys: number;
   sells: number;
   txs: PeriodContributionTx[];
 }> {
-  // For the "all" view, the segment IS the user's full asset universe.
-  // Materialise it so the "fund source outside segment" check works
-  // uniformly. (One small query; cheap.) We pull names/symbols at the
-  // same time so the deep-dive view doesn't need a second pass.
+  // We pull asset names/symbols/classes at the same time so the
+  // deep-dive view doesn't need a second pass and the cash-asset
+  // filter doesn't either.
   const userAssets = await db
     .select({
       id: schema.assets.id,
       name: schema.assets.name,
       symbol: schema.assets.symbol,
+      assetClass: schema.assets.assetClass,
     })
     .from(schema.assets)
     .where(eq(schema.assets.userId, userId));
-  const nameById = new Map(userAssets.map((a) => [a.id, { name: a.name, symbol: a.symbol }]));
+  const metaById = new Map(userAssets.map((a) => [a.id, a]));
 
-  const effectiveSegment: Set<string> = segmentAssetIds
-    ? segmentAssetIds
-    : new Set(userAssets.map((a) => a.id));
+  // Segment scope still applies (e.g. "Equity MF" excludes stocks).
+  // When no segment, every asset is in scope; the cash-class filter
+  // below then strips bookkeeping-only assets.
+  const inSegment = (id: string | null | undefined): boolean => {
+    if (!id) return false;
+    if (!segmentAssetIds) return true;
+    return segmentAssetIds.has(id);
+  };
 
   const txs = await db
     .select({
@@ -240,14 +266,23 @@ async function computePeriodContributions(
   let sells = 0;
   const kept: PeriodContributionTx[] = [];
   for (const tx of txs) {
-    if (!effectiveSegment.has(tx.assetId)) continue;
+    if (!inSegment(tx.assetId)) continue;
+    const assetMeta = metaById.get(tx.assetId);
+    if (!assetMeta) continue;
+
+    // Skip cash-side assets entirely — bank/wallet movements,
+    // expenses, employer EPF contributions, lending to friends, etc.
+    // are not "buying" or "selling" investments.
+    if (CASH_LIKE_ASSET_CLASSES.has(assetMeta.assetClass)) continue;
+
     const native = tx.quantity * tx.price;
     const inrValue = toInr(native, tx.currency || 'INR', usdToInr);
 
     let signedInr: number;
     if (tx.type === 'buy') {
+      // Dividends, scheme bonuses, and other unsourced credits are not
+      // user contributions.
       if (!tx.fundSourceId) continue;
-      if (effectiveSegment.has(tx.fundSourceId)) continue;
       signedInr = inrValue;
       buys += inrValue;
     } else {
@@ -255,14 +290,13 @@ async function computePeriodContributions(
       sells += inrValue;
     }
 
-    const assetMeta = nameById.get(tx.assetId);
-    const fundSourceMeta = tx.fundSourceId ? nameById.get(tx.fundSourceId) : null;
+    const fundSourceMeta = tx.fundSourceId ? metaById.get(tx.fundSourceId) : null;
     kept.push({
       date: tx.transactionDate,
       type: tx.type,
       assetId: tx.assetId,
-      assetName: assetMeta?.name ?? 'Unknown',
-      assetSymbol: assetMeta?.symbol ?? '',
+      assetName: assetMeta.name,
+      assetSymbol: assetMeta.symbol,
       fundSourceName: fundSourceMeta?.name ?? null,
       nativeAmount: native,
       currency: tx.currency || 'INR',
@@ -270,11 +304,9 @@ async function computePeriodContributions(
     });
   }
 
-  // Most-recent first — matches how the cash-flow waterfall expansion
-  // displays its line items.
   kept.sort((a, b) => b.date.localeCompare(a.date));
 
-  return { total: buys - sells, buys, sells, txs: kept };
+  return { buys, sells, txs: kept };
 }
 
 async function getFirstTransactionDate(
@@ -947,7 +979,6 @@ export const performanceService = {
     const periodStartValue = valueHistory.length > 0 ? valueHistory[0].value : 0;
     const periodEndValue = finalValue;
     const {
-      total: periodContributions,
       buys: periodBuys,
       sells: periodSells,
       txs: periodContributionTxs,
@@ -958,7 +989,15 @@ export const performanceService = {
       allowedAssetIds ?? null,
       usdToInr,
     );
-    const periodMarketGain = periodEndValue - periodStartValue - periodContributions;
+    const periodContributions = periodBuys - periodSells;
+    // Real return in rupees: derive from the time-weighted NAV return
+    // applied to the starting value. This matches the % shown elsewhere
+    // and is unaffected by the size or timing of contributions, which
+    // is what makes it an honest "real return". (We deliberately do
+    // NOT compute it as endValue − startValue − contributions, because
+    // for the All segment that residual is dominated by cash flows like
+    // salary credits and expenses, not market movement.)
+    const periodMarketGain = (periodStartValue * navReturn) / 100;
 
     return {
       interval,
