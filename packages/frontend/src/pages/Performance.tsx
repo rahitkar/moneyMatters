@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Download, Activity, ArrowUpRight, ArrowDownRight, ChevronUp, ChevronDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Download, Activity, ArrowUpRight, ArrowDownRight, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
@@ -820,19 +820,40 @@ interface PeriodBreakdownCardProps {
 
 // Period-scoped waterfall: starting value → +/- money in → +/- market gain
 // → ending value. Distinguishes "I added money" from "the market moved",
-// which is the question users actually care about for a given window.
+// which is the question users actually care about for a given window. The
+// "Money added/withdrawn" row is expandable to show the underlying buys
+// and sells for full traceability.
 function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreakdownCardProps) {
-  const { periodStartValue, periodEndValue, periodContributions, periodMarketGain } = portfolio;
+  const {
+    periodStartValue,
+    periodEndValue,
+    periodContributions,
+    periodMarketGain,
+    periodContributionTxs,
+  } = portfolio;
+  const [contribExpanded, setContribExpanded] = useState(false);
   const totalChange = periodEndValue - periodStartValue;
 
-  // Skip the card when there's nothing meaningful to say (e.g. ALL window
-  // on a brand-new portfolio with start = end = 0).
   if (periodStartValue === 0 && periodEndValue === 0) return null;
 
   const gainPct = periodStartValue > 0 ? (periodMarketGain / periodStartValue) * 100 : null;
 
   const fmtUsd = (inr: number) =>
     usdToInr ? formatCurrency(inr / usdToInr, 'USD') : null;
+
+  const toneClass = (tone: 'neutral' | 'in' | 'out' | 'gain' | 'loss') =>
+    clsx({
+      'text-surface-100': tone === 'neutral',
+      'text-cyan-400': tone === 'in',
+      'text-amber-400': tone === 'out',
+      'text-green-400': tone === 'gain',
+      'text-red-400': tone === 'loss',
+    });
+
+  const formatSigned = (value: number, sign: '+' | '-' | '=' | null) =>
+    sign === '+' ? `+${formatCurrency(value, 'INR')}` :
+    sign === '-' ? `−${formatCurrency(Math.abs(value), 'INR')}` :
+    formatCurrency(value, 'INR');
 
   const Row = ({
     label,
@@ -847,16 +868,6 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
     tone: 'neutral' | 'in' | 'out' | 'gain' | 'loss';
     hint?: string;
   }) => {
-    const toneClass = clsx({
-      'text-surface-100': tone === 'neutral',
-      'text-cyan-400': tone === 'in',
-      'text-amber-400': tone === 'out',
-      'text-green-400': tone === 'gain',
-      'text-red-400': tone === 'loss',
-    });
-    const display = sign === '+' ? `+${formatCurrency(value, 'INR')}` :
-                    sign === '-' ? `−${formatCurrency(Math.abs(value), 'INR')}` :
-                    formatCurrency(value, 'INR');
     const usd = fmtUsd(Math.abs(value));
     return (
       <div className="flex items-center justify-between py-2 border-b border-surface-800 last:border-0">
@@ -865,7 +876,7 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
           {hint && <div className="text-xs text-surface-500 mt-0.5">{hint}</div>}
         </div>
         <div className="text-right">
-          <div className={clsx('text-base font-medium tabular-nums', toneClass)}>{display}</div>
+          <div className={clsx('text-base font-medium tabular-nums', toneClass(tone))}>{formatSigned(value, sign)}</div>
           {usd && <div className="text-[10px] text-surface-500 tabular-nums">{sign === '+' ? '+' : sign === '-' ? '−' : ''}{usd}</div>}
         </div>
       </div>
@@ -874,6 +885,9 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
 
   const contribSign: '+' | '-' = periodContributions >= 0 ? '+' : '-';
   const gainSign: '+' | '-' = periodMarketGain >= 0 ? '+' : '-';
+  const contribTone: 'in' | 'out' = periodContributions >= 0 ? 'in' : 'out';
+  const contribLabel = periodContributions >= 0 ? 'Money added' : 'Money withdrawn';
+  const hasTxs = (periodContributionTxs ?? []).length > 0;
 
   return (
     <Card>
@@ -900,13 +914,92 @@ function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreak
           tone="neutral"
           hint={`as of ${formatDate(portfolio.startDate)}`}
         />
-        <Row
-          label={periodContributions >= 0 ? 'Money added' : 'Money withdrawn'}
-          value={periodContributions}
-          sign={contribSign}
-          tone={periodContributions >= 0 ? 'in' : 'out'}
-          hint="net of bank-funded buys and bank-bound sells; dividends excluded"
-        />
+
+        {/* Money added/withdrawn — expandable when there are underlying txs */}
+        <div className="border-b border-surface-800">
+          <button
+            type="button"
+            onClick={() => hasTxs && setContribExpanded((v) => !v)}
+            className={clsx(
+              'w-full flex items-center justify-between py-2 text-left',
+              hasTxs ? 'hover:bg-surface-800/40 cursor-pointer rounded -mx-1 px-1' : 'cursor-default'
+            )}
+            aria-expanded={contribExpanded}
+            disabled={!hasTxs}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {hasTxs ? (
+                contribExpanded
+                  ? <ChevronDown className="w-3.5 h-3.5 text-surface-500 shrink-0" />
+                  : <ChevronRight className="w-3.5 h-3.5 text-surface-500 shrink-0" />
+              ) : (
+                <span className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <div className="text-sm text-surface-200">{contribLabel}</div>
+                <div className="text-xs text-surface-500 mt-0.5">
+                  {hasTxs
+                    ? `${periodContributionTxs.length} transaction${periodContributionTxs.length === 1 ? '' : 's'} · click to ${contribExpanded ? 'hide' : 'see'} details`
+                    : 'no contributions in this window'}
+                </div>
+              </div>
+            </div>
+            <div className="text-right pl-2">
+              <div className={clsx('text-base font-medium tabular-nums', toneClass(contribTone))}>
+                {formatSigned(periodContributions, contribSign)}
+              </div>
+              {fmtUsd(Math.abs(periodContributions)) && (
+                <div className="text-[10px] text-surface-500 tabular-nums">
+                  {contribSign}{fmtUsd(Math.abs(periodContributions))}
+                </div>
+              )}
+            </div>
+          </button>
+
+          {contribExpanded && hasTxs && (
+            <div className="ml-5 mb-2 border-l border-surface-700/60 pl-3 space-y-1">
+              {periodContributionTxs.map((tx, idx) => {
+                const isBuy = tx.type === 'buy';
+                const sign: '+' | '-' = isBuy ? '+' : '-';
+                const native = formatCurrency(tx.nativeAmount, tx.currency);
+                const inr = formatCurrency(Math.abs(tx.signedInr), 'INR');
+                const showNative = tx.currency !== 'INR';
+                return (
+                  <div key={`${tx.assetId}-${tx.date}-${idx}`} className="flex items-start justify-between py-1 text-xs">
+                    <div className="min-w-0 pr-2">
+                      <div className="text-surface-300 truncate">
+                        <span className="text-surface-500">{formatDate(tx.date)}</span>
+                        <span className="mx-1.5 text-surface-600">·</span>
+                        <span className="text-surface-200">{tx.assetName}</span>
+                        {tx.assetSymbol && <span className="text-surface-500 ml-1">({tx.assetSymbol})</span>}
+                      </div>
+                      <div className="text-[11px] text-surface-500 mt-0.5">
+                        {isBuy
+                          ? tx.fundSourceName
+                            ? <>from <span className="text-surface-400">{tx.fundSourceName}</span></>
+                            : <span>buy</span>
+                          : tx.fundSourceName
+                            ? <>to <span className="text-surface-400">{tx.fundSourceName}</span></>
+                            : <span>sell</span>}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={clsx('tabular-nums', isBuy ? 'text-cyan-400' : 'text-amber-400')}>
+                        {sign}{inr}
+                      </div>
+                      {showNative && (
+                        <div className="text-[10px] text-surface-500 tabular-nums">
+                          {sign}{native}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <Row
           label={periodMarketGain >= 0 ? 'Market gain' : 'Market loss'}
           value={periodMarketGain}

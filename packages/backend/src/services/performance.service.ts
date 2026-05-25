@@ -73,6 +73,10 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   periodEndValue: number;
   periodContributions: number;
   periodMarketGain: number;
+  /** Per-transaction breakdown of `periodContributions` so the UI can
+   *  show which buys/sells made up the total. Sums of `signedInr` across
+   *  this array equal `periodContributions`. */
+  periodContributionTxs: PeriodContributionTx[];
 }
 
 export interface PerformanceComparison {
@@ -156,26 +160,49 @@ function getStartDate(interval: TimeInterval): Date | null {
  * rate.) Using historical/transaction-date FX would be more accurate
  * for "actual rupees moved" but would break the identity.
  */
+/** Single transaction kept for the deep-dive view of period contributions. */
+export interface PeriodContributionTx {
+  /** transaction date, ISO yyyy-mm-dd */
+  date: string;
+  /** 'buy' adds to the total (signedInr > 0); 'sell' subtracts (signedInr < 0). */
+  type: 'buy' | 'sell';
+  assetId: string;
+  assetName: string;
+  assetSymbol: string;
+  /** Where the money came from (buys) or null for sells without a recorded source. */
+  fundSourceName: string | null;
+  /** Native amount = quantity × price, in the asset's currency. */
+  nativeAmount: number;
+  /** Currency of nativeAmount. */
+  currency: string;
+  /** INR-equivalent at current FX, signed (+ for buys, − for sells). Sums to periodContributions. */
+  signedInr: number;
+}
+
 async function computePeriodContributions(
   userId: string,
   startDateStr: string,
   endDateStr: string,
   segmentAssetIds: Set<string> | null,
   usdToInr: number | null,
-): Promise<number> {
+): Promise<{ total: number; txs: PeriodContributionTx[] }> {
   // For the "all" view, the segment IS the user's full asset universe.
   // Materialise it so the "fund source outside segment" check works
-  // uniformly. (One small query; cheap.)
-  let effectiveSegment: Set<string>;
-  if (segmentAssetIds) {
-    effectiveSegment = segmentAssetIds;
-  } else {
-    const all = await db
-      .select({ id: schema.assets.id })
-      .from(schema.assets)
-      .where(eq(schema.assets.userId, userId));
-    effectiveSegment = new Set(all.map((r) => r.id));
-  }
+  // uniformly. (One small query; cheap.) We pull names/symbols at the
+  // same time so the deep-dive view doesn't need a second pass.
+  const userAssets = await db
+    .select({
+      id: schema.assets.id,
+      name: schema.assets.name,
+      symbol: schema.assets.symbol,
+    })
+    .from(schema.assets)
+    .where(eq(schema.assets.userId, userId));
+  const nameById = new Map(userAssets.map((a) => [a.id, { name: a.name, symbol: a.symbol }]));
+
+  const effectiveSegment: Set<string> = segmentAssetIds
+    ? segmentAssetIds
+    : new Set(userAssets.map((a) => a.id));
 
   const txs = await db
     .select({
@@ -185,6 +212,7 @@ async function computePeriodContributions(
       assetId: schema.transactions.assetId,
       fundSourceId: schema.transactions.fundSourceId,
       currency: schema.assets.currency,
+      transactionDate: schema.transactions.transactionDate,
     })
     .from(schema.transactions)
     .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
@@ -197,22 +225,42 @@ async function computePeriodContributions(
     );
 
   let total = 0;
+  const kept: PeriodContributionTx[] = [];
   for (const tx of txs) {
     if (!effectiveSegment.has(tx.assetId)) continue;
     const native = tx.quantity * tx.price;
     const inrValue = toInr(native, tx.currency || 'INR', usdToInr);
 
+    let signedInr: number;
     if (tx.type === 'buy') {
       if (!tx.fundSourceId) continue;
-      // Intra-segment rebalancing — both legs are inside the view.
       if (effectiveSegment.has(tx.fundSourceId)) continue;
-      total += inrValue;
+      signedInr = inrValue;
     } else {
-      total -= inrValue;
+      signedInr = -inrValue;
     }
+    total += signedInr;
+
+    const assetMeta = nameById.get(tx.assetId);
+    const fundSourceMeta = tx.fundSourceId ? nameById.get(tx.fundSourceId) : null;
+    kept.push({
+      date: tx.transactionDate,
+      type: tx.type,
+      assetId: tx.assetId,
+      assetName: assetMeta?.name ?? 'Unknown',
+      assetSymbol: assetMeta?.symbol ?? '',
+      fundSourceName: fundSourceMeta?.name ?? null,
+      nativeAmount: native,
+      currency: tx.currency || 'INR',
+      signedInr,
+    });
   }
 
-  return total;
+  // Most-recent first — matches how the cash-flow waterfall expansion
+  // displays its line items.
+  kept.sort((a, b) => b.date.localeCompare(a.date));
+
+  return { total, txs: kept };
 }
 
 async function getFirstTransactionDate(
@@ -884,13 +932,14 @@ export const performanceService = {
     // the same set of holdings.
     const periodStartValue = valueHistory.length > 0 ? valueHistory[0].value : 0;
     const periodEndValue = finalValue;
-    const periodContributions = await computePeriodContributions(
-      userId,
-      startDateStr,
-      endDateStr,
-      allowedAssetIds ?? null,
-      usdToInr,
-    );
+    const { total: periodContributions, txs: periodContributionTxs } =
+      await computePeriodContributions(
+        userId,
+        startDateStr,
+        endDateStr,
+        allowedAssetIds ?? null,
+        usdToInr,
+      );
     const periodMarketGain = periodEndValue - periodStartValue - periodContributions;
 
     return {
@@ -913,6 +962,7 @@ export const performanceService = {
       periodEndValue,
       periodContributions,
       periodMarketGain,
+      periodContributionTxs,
     };
   },
 

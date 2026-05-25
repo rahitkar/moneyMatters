@@ -227,6 +227,25 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   periodEndValue: number;
   periodContributions: number;
   periodMarketGain: number;
+  /** Per-transaction breakdown of `periodContributions`. The sum of
+   *  `signedInr` across these rows equals `periodContributions`. */
+  periodContributionTxs: PeriodContributionTx[];
+}
+
+/**
+ * Single transaction kept for the deep-dive view of period contributions.
+ * Buys contribute positive `signedInr`; sells contribute negative.
+ */
+export interface PeriodContributionTx {
+  date: string;
+  type: 'buy' | 'sell';
+  assetId: string;
+  assetName: string;
+  assetSymbol: string;
+  fundSourceName: string | null;
+  nativeAmount: number;
+  currency: string;
+  signedInr: number;
 }
 
 export interface BenchmarkPerformance {
