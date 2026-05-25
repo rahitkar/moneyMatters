@@ -340,6 +340,21 @@ export interface InvestmentRow {
   foreignQuantity: number | null;
 }
 
+/**
+ * Single transaction row contributing to a Bank Account Flow waterfall
+ * line (Investment Transfers or Wallet/Broker Transfers). The cash-flow
+ * page uses these to expand each total into its underlying purchases.
+ */
+export interface BankFlowTx {
+  date: string;
+  assetId: string;
+  assetName: string;
+  assetSymbol: string;
+  amountInr: number;
+  nativeAmount: number;
+  currency: string;
+}
+
 export type PaymentMethodType = 'cash' | 'credit_card' | 'debit_card' | 'upi' | 'bank_transfer';
 
 export interface PaymentMethod {
@@ -408,6 +423,13 @@ export interface CashFlowMonthSummary {
     totalInvested: number;
     bankInvestments: number;
     walletTransfers: number;
+    /** Per-transaction breakdown behind the bankInvestments total — buys
+     *  of non-cash assets (MFs, stocks) funded directly from the primary
+     *  bank. Sorted most-recent first. */
+    bankInvestmentTxs: BankFlowTx[];
+    /** Per-transaction breakdown behind the walletTransfers total —
+     *  bank → broker-wallet movements (Zerodha, INDmoney, etc.). */
+    walletTransferTxs: BankFlowTx[];
     closingBalance: number | null;
     savings: number;
   };

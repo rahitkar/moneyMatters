@@ -593,6 +593,15 @@ export const cashFlowService = {
     investments: { assetId: string; name: string; symbol: string; currency: string; amount: number; amountInr: number; foreignQuantity: number | null; fundSourceId: string | null }[];
     walletTransfers: number;
     bankInvestments: number;
+    /**
+     * Per-transaction breakdown behind the two bank-outflow buckets,
+     * surfaced so the cash-flow page can show users *which* purchases
+     * make up the "Investment Transfers" / "Wallet Transfers" totals.
+     * Both lists are restricted to fund_source = primary bank, since
+     * those are the only buys that affect the bank waterfall.
+     */
+    bankInvestmentTxs: Array<{ date: string; assetId: string; assetName: string; assetSymbol: string; amountInr: number; nativeAmount: number; currency: string }>;
+    walletTransferTxs: Array<{ date: string; assetId: string; assetName: string; assetSymbol: string; amountInr: number; nativeAmount: number; currency: string }>;
     usdInrRate: number | null;
   }> {
     const cycleDay = await getCycleStartDay(userId);
@@ -647,6 +656,18 @@ export const cashFlowService = {
     const investmentTx: typeof allTx = [];
     let walletTransfers = 0;
     let bankInvestments = 0;
+    const bankInvestmentTxs: Array<{ date: string; assetId: string; assetName: string; assetSymbol: string; amountInr: number; nativeAmount: number; currency: string }> = [];
+    const walletTransferTxs: Array<{ date: string; assetId: string; assetName: string; assetSymbol: string; amountInr: number; nativeAmount: number; currency: string }> = [];
+
+    const txRow = (tx: typeof allTx[number]): { date: string; assetId: string; assetName: string; assetSymbol: string; amountInr: number; nativeAmount: number; currency: string } => ({
+      date: tx.date,
+      assetId: tx.assetId,
+      assetName: tx.assetName,
+      assetSymbol: tx.assetSymbol,
+      amountInr: inrAmount(tx),
+      nativeAmount: tx.quantity * tx.price,
+      currency: tx.assetCurrency ?? 'INR',
+    });
 
     for (const tx of allTx) {
       if (tx.type !== 'buy') continue;
@@ -659,7 +680,10 @@ export const cashFlowService = {
       // walletTransfer when the source is the primary bank, so the
       // bank-balance waterfall reflects the outflow exactly once.
       if (tx.fundSourceId && cashAssetIds.has(tx.assetId) && cashAssetIds.has(tx.fundSourceId)) {
-        if (tx.fundSourceId === primaryBankId) walletTransfers += inr;
+        if (tx.fundSourceId === primaryBankId) {
+          walletTransfers += inr;
+          walletTransferTxs.push(txRow(tx));
+        }
         continue;
       }
       // Buy of a non-cash asset funded by a cash/bank source.
@@ -672,7 +696,10 @@ export const cashFlowService = {
         // Zerodha) are downstream allocations of money that already left
         // the bank when the wallet was topped up — counting them again
         // here would double-count the bank outflow.
-        if (tx.fundSourceId === primaryBankId) bankInvestments += inr;
+        if (tx.fundSourceId === primaryBankId) {
+          bankInvestments += inr;
+          bankInvestmentTxs.push(txRow(tx));
+        }
         continue;
       }
       // A buy with no fund_source represents money credited to the
@@ -708,10 +735,17 @@ export const cashFlowService = {
       grouped.set(tx.assetId, existing);
     }
 
+    // Most-recent-first ordering — matches how a bank statement reads,
+    // and lines up with the per-month context the cash-flow page shows.
+    bankInvestmentTxs.sort((a, b) => b.date.localeCompare(a.date));
+    walletTransferTxs.sort((a, b) => b.date.localeCompare(a.date));
+
     return {
       investments: Array.from(grouped, ([assetId, data]) => ({ assetId, ...data })),
       walletTransfers,
       bankInvestments,
+      bankInvestmentTxs,
+      walletTransferTxs,
       usdInrRate,
     };
   },
@@ -773,6 +807,8 @@ export const cashFlowService = {
     const investments = investmentBreakdown.investments;
     const walletTransfers = investmentBreakdown.walletTransfers;
     const bankInvestments = investmentBreakdown.bankInvestments;
+    const bankInvestmentTxs = investmentBreakdown.bankInvestmentTxs;
+    const walletTransferTxs = investmentBreakdown.walletTransferTxs;
 
     const categoryMap = new Map(categories.map((c) => [c.id, c]));
     const expenseRows = entries
@@ -946,6 +982,8 @@ export const cashFlowService = {
         totalInvested,
         bankInvestments,
         walletTransfers,
+        bankInvestmentTxs,
+        walletTransferTxs,
         closingBalance,
         savings,
       },

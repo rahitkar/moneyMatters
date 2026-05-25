@@ -206,6 +206,9 @@ export default function CashFlow() {
   const fireWhatIf = useFireWhatIf();
   const [whatIfOpen, setWhatIfOpen] = useState(false);
   const [whatIfSavings, setWhatIfSavings] = useState('');
+  // Tracks which Bank Account Flow rows have their per-tx detail expanded.
+  // Set of row labels keeps the API stable even if order changes later.
+  const [expandedFlowRows, setExpandedFlowRows] = useState<Set<string>>(new Set());
 
   // Reset what-if state when the user navigates to a different month so they
   // don't see January's hypothetical cards while looking at February.
@@ -258,7 +261,7 @@ export default function CashFlow() {
           {fyMonths.map((m) => (
             <button
               key={m}
-              onClick={() => { setSelectedMonth(m); setFilterPmId(null); }}
+              onClick={() => { setSelectedMonth(m); setFilterPmId(null); setExpandedFlowRows(new Set()); }}
               className={clsx(
                 'px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-col items-center',
                 selectedMonth === m
@@ -408,23 +411,87 @@ export default function CashFlow() {
               const wt = summary.waterfall.walletTransfers ?? 0;
               const transfersIn = summary.waterfall.cashUpiTransfersIn ?? 0;
               const currentBankBalance = ob + summary.waterfall.totalIncome + transfersIn - bi - wt - summary.waterfall.cashUpiExpenses;
+              type FlowRow = {
+                label: string;
+                value: number | null;
+                color: string;
+                sign: string;
+                /** When set, the row becomes expandable and shows these
+                 *  per-tx detail lines below it. */
+                txs?: typeof summary.waterfall.bankInvestmentTxs;
+              };
+              const rows: FlowRow[] = [
+                { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
+                { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
+                ...(transfersIn > 0 ? [{ label: 'Transfers In (reimbursements, money returned)', value: transfersIn, color: 'text-sky-400', sign: '+' }] : []),
+                ...(bi > 0 ? [{ label: 'Investment Transfers', value: bi, color: 'text-blue-400', sign: '−', txs: summary.waterfall.bankInvestmentTxs }] : []),
+                ...(wt > 0 ? [{ label: 'Wallet / Broker Transfers', value: wt, color: 'text-purple-400', sign: '−', txs: summary.waterfall.walletTransferTxs }] : []),
+                { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
+              ];
+              const toggleExpanded = (label: string) => {
+                setExpandedFlowRows((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(label)) next.delete(label);
+                  else next.add(label);
+                  return next;
+                });
+              };
               return (
                 <div className="space-y-1.5 text-sm">
-                  {[
-                    { label: summary.income.openingBalanceAutoCarried ? 'Opening Bank Balance (carried forward)' : 'Opening Bank Balance', value: summary.waterfall.openingBalance, color: 'text-brand-400', sign: '' },
-                    { label: 'Income (Salary + Other)', value: summary.waterfall.totalIncome, color: 'text-green-400', sign: '+' },
-                    ...(transfersIn > 0 ? [{ label: 'Transfers In (reimbursements, money returned)', value: transfersIn, color: 'text-sky-400', sign: '+' }] : []),
-                    ...(bi > 0 ? [{ label: 'Investment Transfers', value: bi, color: 'text-blue-400', sign: '−' }] : []),
-                    ...(wt > 0 ? [{ label: 'Wallet / Broker Transfers', value: wt, color: 'text-purple-400', sign: '−' }] : []),
-                    { label: 'Cash / UPI / Bank Expenses', value: summary.waterfall.cashUpiExpenses, color: 'text-red-400', sign: '−' },
-                  ].map((row) => (
-                    <div key={row.label} className="flex items-center justify-between py-1 border-b border-surface-800 last:border-b-0">
-                      <span className="text-surface-400">{row.sign ? `${row.sign} ` : ''}{row.label}</span>
-                      <span className={clsx('font-mono font-medium', row.color)}>
-                        {row.value != null ? formatCurrency(row.value, 'INR') : '—'}
-                      </span>
-                    </div>
-                  ))}
+                  {rows.map((row) => {
+                    const expandable = !!(row.txs && row.txs.length > 0);
+                    const isOpen = expandable && expandedFlowRows.has(row.label);
+                    return (
+                      <div key={row.label}>
+                        <div
+                          className={clsx(
+                            'flex items-center justify-between py-1 border-b border-surface-800',
+                            expandable && 'cursor-pointer hover:bg-surface-800/40 -mx-2 px-2 rounded transition-colors',
+                          )}
+                          onClick={expandable ? () => toggleExpanded(row.label) : undefined}
+                          role={expandable ? 'button' : undefined}
+                          tabIndex={expandable ? 0 : undefined}
+                          onKeyDown={expandable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpanded(row.label); } } : undefined}
+                          title={expandable ? `Click to ${isOpen ? 'hide' : 'see'} the ${row.txs!.length} underlying transaction${row.txs!.length === 1 ? '' : 's'}` : undefined}
+                        >
+                          <span className="text-surface-400 flex items-center gap-1">
+                            {expandable && (isOpen
+                              ? <ChevronDown className="w-3.5 h-3.5 text-surface-500" />
+                              : <ChevronRight className="w-3.5 h-3.5 text-surface-500" />)}
+                            {row.sign ? `${row.sign} ` : ''}{row.label}
+                            {expandable && (
+                              <span className="text-[10px] text-surface-500">({row.txs!.length})</span>
+                            )}
+                          </span>
+                          <span className={clsx('font-mono font-medium', row.color)}>
+                            {row.value != null ? formatCurrency(row.value, 'INR') : '—'}
+                          </span>
+                        </div>
+                        {isOpen && row.txs && (
+                          <div className="ml-4 mb-1 mt-0.5 space-y-0.5 border-l-2 border-surface-700 pl-3">
+                            {row.txs.map((tx, idx) => (
+                              <div key={`${row.label}-${tx.assetId}-${tx.date}-${idx}`} className="flex items-center justify-between py-0.5 text-xs">
+                                <span className="text-surface-400 flex items-center gap-2 truncate">
+                                  <span className="text-surface-500 font-mono shrink-0 tabular-nums">
+                                    {new Date(tx.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                  </span>
+                                  <span className="truncate">{tx.assetName}</span>
+                                </span>
+                                <span className={clsx('font-mono tabular-nums shrink-0', row.color, 'opacity-90')}>
+                                  {formatCurrency(tx.amountInr, 'INR')}
+                                  {tx.currency !== 'INR' && (
+                                    <span className="text-surface-500 ml-1.5 text-[10px]">
+                                      ({formatCurrency(tx.nativeAmount, tx.currency)})
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {summary.waterfall.openingBalance != null && (
                     <div className="flex items-center justify-between py-2 border-t-2 border-brand-500/30 bg-brand-500/5 rounded-lg px-2 -mx-1 mt-1">
                       <div className="flex items-center gap-2">
