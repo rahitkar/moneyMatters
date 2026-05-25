@@ -71,11 +71,18 @@ export interface PortfolioPerformance extends PerformanceMetrics {
    */
   periodStartValue: number;
   periodEndValue: number;
+  /** Net new money into the segment (buys − sells, INR, current FX).
+   *  Kept for any caller still using the combined number. */
   periodContributions: number;
+  /** Sum of qualifying buys (always ≥ 0) over the period, INR. */
+  periodBuys: number;
+  /** Sum of qualifying sells (always ≥ 0) over the period, INR. */
+  periodSells: number;
+  /** Real return in rupees: endValue − startValue − buys + sells. */
   periodMarketGain: number;
-  /** Per-transaction breakdown of `periodContributions` so the UI can
-   *  show which buys/sells made up the total. Sums of `signedInr` across
-   *  this array equal `periodContributions`. */
+  /** Per-transaction backing for both buys and sells. Filter by
+   *  `tx.type` to reconstruct each side. `signedInr > 0` for buys,
+   *  `signedInr < 0` for sells. */
   periodContributionTxs: PeriodContributionTx[];
 }
 
@@ -185,7 +192,12 @@ async function computePeriodContributions(
   endDateStr: string,
   segmentAssetIds: Set<string> | null,
   usdToInr: number | null,
-): Promise<{ total: number; txs: PeriodContributionTx[] }> {
+): Promise<{
+  total: number;
+  buys: number;
+  sells: number;
+  txs: PeriodContributionTx[];
+}> {
   // For the "all" view, the segment IS the user's full asset universe.
   // Materialise it so the "fund source outside segment" check works
   // uniformly. (One small query; cheap.) We pull names/symbols at the
@@ -224,7 +236,8 @@ async function computePeriodContributions(
       ),
     );
 
-  let total = 0;
+  let buys = 0;
+  let sells = 0;
   const kept: PeriodContributionTx[] = [];
   for (const tx of txs) {
     if (!effectiveSegment.has(tx.assetId)) continue;
@@ -236,10 +249,11 @@ async function computePeriodContributions(
       if (!tx.fundSourceId) continue;
       if (effectiveSegment.has(tx.fundSourceId)) continue;
       signedInr = inrValue;
+      buys += inrValue;
     } else {
       signedInr = -inrValue;
+      sells += inrValue;
     }
-    total += signedInr;
 
     const assetMeta = nameById.get(tx.assetId);
     const fundSourceMeta = tx.fundSourceId ? nameById.get(tx.fundSourceId) : null;
@@ -260,7 +274,7 @@ async function computePeriodContributions(
   // displays its line items.
   kept.sort((a, b) => b.date.localeCompare(a.date));
 
-  return { total, txs: kept };
+  return { total: buys - sells, buys, sells, txs: kept };
 }
 
 async function getFirstTransactionDate(
@@ -932,14 +946,18 @@ export const performanceService = {
     // the same set of holdings.
     const periodStartValue = valueHistory.length > 0 ? valueHistory[0].value : 0;
     const periodEndValue = finalValue;
-    const { total: periodContributions, txs: periodContributionTxs } =
-      await computePeriodContributions(
-        userId,
-        startDateStr,
-        endDateStr,
-        allowedAssetIds ?? null,
-        usdToInr,
-      );
+    const {
+      total: periodContributions,
+      buys: periodBuys,
+      sells: periodSells,
+      txs: periodContributionTxs,
+    } = await computePeriodContributions(
+      userId,
+      startDateStr,
+      endDateStr,
+      allowedAssetIds ?? null,
+      usdToInr,
+    );
     const periodMarketGain = periodEndValue - periodStartValue - periodContributions;
 
     return {
@@ -961,6 +979,8 @@ export const performanceService = {
       periodStartValue,
       periodEndValue,
       periodContributions,
+      periodBuys,
+      periodSells,
       periodMarketGain,
       periodContributionTxs,
     };

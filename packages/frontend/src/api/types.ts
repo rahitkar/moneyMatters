@@ -225,10 +225,16 @@ export interface PortfolioPerformance extends PerformanceMetrics {
    */
   periodStartValue: number;
   periodEndValue: number;
+  /** Net new money into the segment (buys − sells, INR). */
   periodContributions: number;
+  /** Sum of qualifying buys (always ≥ 0), INR. */
+  periodBuys: number;
+  /** Sum of qualifying sells (always ≥ 0), INR. */
+  periodSells: number;
+  /** Real return in rupees: endValue − startValue − buys + sells. */
   periodMarketGain: number;
-  /** Per-transaction breakdown of `periodContributions`. The sum of
-   *  `signedInr` across these rows equals `periodContributions`. */
+  /** Per-transaction backing for both buys and sells; filter by
+   *  `tx.type` to render each side. */
   periodContributionTxs: PeriodContributionTx[];
 }
 
