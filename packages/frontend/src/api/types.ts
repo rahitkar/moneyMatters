@@ -218,6 +218,15 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   navHistory: { date: string; nav: number }[];
   currentNAV: number;
   totalUnits: number;
+  /**
+   * Period-scoped breakdown — answers "what's my actual market profit
+   * over this window vs. money I added?". The identity holds:
+   *   periodEndValue − periodStartValue = periodContributions + periodMarketGain
+   */
+  periodStartValue: number;
+  periodEndValue: number;
+  periodContributions: number;
+  periodMarketGain: number;
 }
 
 export interface BenchmarkPerformance {

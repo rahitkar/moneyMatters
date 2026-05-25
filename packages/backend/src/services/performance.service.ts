@@ -59,6 +59,20 @@ export interface PortfolioPerformance extends PerformanceMetrics {
   navHistory: { date: string; nav: number }[];
   currentNAV: number;
   totalUnits: number;
+  /**
+   * Period-scoped breakdown — the answer to "what is my actual profit
+   * over this window vs. money I put in". The identity holds:
+   *   periodEndValue − periodStartValue = periodContributions + periodMarketGain
+   * `periodContributions` is the net money entering the tracked-investment
+   * universe from the primary bank within the window (bank-funded buys
+   * and wallet top-ups, minus sells whose proceeds returned to bank).
+   * Dividends/interest credits and intra-portfolio rebalancing are
+   * excluded — they are not user contributions.
+   */
+  periodStartValue: number;
+  periodEndValue: number;
+  periodContributions: number;
+  periodMarketGain: number;
 }
 
 export interface PerformanceComparison {
@@ -110,6 +124,95 @@ function getStartDate(interval: TimeInterval): Date | null {
     default:
       return new Date(now.setMonth(now.getMonth() - 1));
   }
+}
+
+/**
+ * Net money the user moved INTO the segment from outside it, over
+ * [startDateStr, endDateStr], in INR.
+ *
+ * Why "from outside"? The user's portfolio universe is closed: bank
+ * accounts and broker wallets are themselves assets. A "bank → MF" buy
+ * doesn't change total portfolio value; it's just rebalancing. New
+ * money only enters via salary/income (recorded in cash_flow, not
+ * transactions). So for the "all" view, contributions are typically
+ * zero, and (endValue − startValue) ≈ pure market gain. For a narrow
+ * segment like "Equity MF", a bank→MF or wallet→MF buy IS new money
+ * entering the segment from outside it.
+ *
+ * Definition:
+ *   • Include each `buy` whose `fund_source_id` is set AND points to
+ *     an asset OUTSIDE the segment. Add buy.amount.
+ *   • Include each `sell` whose asset is in the segment. Subtract
+ *     sell.amount. (Sells in this codebase rarely set fund_source, so
+ *     we treat any sell of a segment asset as exiting the segment.)
+ *   • Skip buys with no fund_source — those are dividends / interest
+ *     credits / scheme bonuses, not contributions.
+ *
+ * Single query, no N+1.
+ *
+ * Currency: amounts are summed in INR using the current FX rate so that
+ * the identity `endValue − startValue = contributions + marketGain`
+ * holds without an FX-mismatch term. (Both sides use the same spot
+ * rate.) Using historical/transaction-date FX would be more accurate
+ * for "actual rupees moved" but would break the identity.
+ */
+async function computePeriodContributions(
+  userId: string,
+  startDateStr: string,
+  endDateStr: string,
+  segmentAssetIds: Set<string> | null,
+  usdToInr: number | null,
+): Promise<number> {
+  // For the "all" view, the segment IS the user's full asset universe.
+  // Materialise it so the "fund source outside segment" check works
+  // uniformly. (One small query; cheap.)
+  let effectiveSegment: Set<string>;
+  if (segmentAssetIds) {
+    effectiveSegment = segmentAssetIds;
+  } else {
+    const all = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(eq(schema.assets.userId, userId));
+    effectiveSegment = new Set(all.map((r) => r.id));
+  }
+
+  const txs = await db
+    .select({
+      type: schema.transactions.type,
+      quantity: schema.transactions.quantity,
+      price: schema.transactions.price,
+      assetId: schema.transactions.assetId,
+      fundSourceId: schema.transactions.fundSourceId,
+      currency: schema.assets.currency,
+    })
+    .from(schema.transactions)
+    .innerJoin(schema.assets, eq(schema.transactions.assetId, schema.assets.id))
+    .where(
+      and(
+        eq(schema.assets.userId, userId),
+        gte(schema.transactions.transactionDate, startDateStr),
+        lte(schema.transactions.transactionDate, endDateStr),
+      ),
+    );
+
+  let total = 0;
+  for (const tx of txs) {
+    if (!effectiveSegment.has(tx.assetId)) continue;
+    const native = tx.quantity * tx.price;
+    const inrValue = toInr(native, tx.currency || 'INR', usdToInr);
+
+    if (tx.type === 'buy') {
+      if (!tx.fundSourceId) continue;
+      // Intra-segment rebalancing — both legs are inside the view.
+      if (effectiveSegment.has(tx.fundSourceId)) continue;
+      total += inrValue;
+    } else {
+      total -= inrValue;
+    }
+  }
+
+  return total;
 }
 
 async function getFirstTransactionDate(
@@ -772,6 +875,24 @@ export const performanceService = {
       ? unrealizedGains + realizedGains
       : finalValue - currentCost;
 
+    // Period-scoped breakdown — answers "how much of the portfolio change
+    // over this window is money I added vs. actual market gain?" Reuses
+    // the valueHistory we already built (no extra portfolio-walk) and
+    // does one transaction aggregation query for contributions. The
+    // identity (periodEnd − periodStart = contributions + gain) holds
+    // exactly because both sides are derived from the same FX rate and
+    // the same set of holdings.
+    const periodStartValue = valueHistory.length > 0 ? valueHistory[0].value : 0;
+    const periodEndValue = finalValue;
+    const periodContributions = await computePeriodContributions(
+      userId,
+      startDateStr,
+      endDateStr,
+      allowedAssetIds ?? null,
+      usdToInr,
+    );
+    const periodMarketGain = periodEndValue - periodStartValue - periodContributions;
+
     return {
       interval,
       startDate: startDateStr,
@@ -788,6 +909,10 @@ export const performanceService = {
       navHistory,
       currentNAV: finalNAV,
       totalUnits,
+      periodStartValue,
+      periodEndValue,
+      periodContributions,
+      periodMarketGain,
     };
   },
 

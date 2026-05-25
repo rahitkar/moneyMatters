@@ -26,7 +26,7 @@ import {
   useDayChanges,
 } from '../api/hooks';
 import { formatCurrency, formatNumber, formatPercent, formatDate, formatRelativeTime } from '../lib/format';
-import type { TimeInterval } from '../api/types';
+import type { TimeInterval, PortfolioPerformance } from '../api/types';
 
 const TIME_INTERVALS: { value: TimeInterval; label: string }[] = [
   { value: '1D', label: '1D' },
@@ -358,27 +358,37 @@ export default function Performance() {
             variant="brand"
           />
           <StatCard
-            label="Total P&L"
+            label="Lifetime P&L"
             value={`${comparison.portfolio.absoluteReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn, 'INR')}`}
             usdSubValue={usdToInr ? `${comparison.portfolio.absoluteReturn >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.absoluteReturn / usdToInr, 'USD')}` : undefined}
+            subValue="unrealized + realized, all time"
             icon={comparison.portfolio.absoluteReturn >= 0 ? TrendingUp : TrendingDown}
             isPositive={comparison.portfolio.absoluteReturn >= 0}
           />
           <StatCard
-            label="Unrealized"
+            label="Lifetime Unrealized"
             value={`${comparison.portfolio.unrealizedGains >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.unrealizedGains, 'INR')}`}
             usdSubValue={usdToInr ? `${comparison.portfolio.unrealizedGains >= 0 ? '+' : ''}${formatCurrency(comparison.portfolio.unrealizedGains / usdToInr, 'USD')}` : undefined}
             icon={comparison.portfolio.unrealizedGains >= 0 ? TrendingUp : TrendingDown}
             isPositive={comparison.portfolio.unrealizedGains >= 0}
           />
           <StatCard
-            label="Realized"
+            label="Lifetime Realized"
             value={`${(realizedGains ?? 0) >= 0 ? '+' : ''}${formatCurrency(realizedGains ?? 0, 'INR')}`}
             usdSubValue={usdToInr ? `${(realizedGains ?? 0) >= 0 ? '+' : ''}${formatCurrency((realizedGains ?? 0) / usdToInr, 'USD')}` : undefined}
             icon={(realizedGains ?? 0) >= 0 ? TrendingUp : TrendingDown}
             isPositive={(realizedGains ?? 0) >= 0}
           />
         </div>
+      )}
+
+      {/* Period Breakdown — answers "actual profit vs. money I put in" for the chosen window */}
+      {comparison && (
+        <PeriodBreakdownCard
+          portfolio={comparison.portfolio}
+          intervalLabel={periodLabel(queryInterval, comparison.portfolio.startDate, comparison.portfolio.endDate)}
+          usdToInr={usdToInr}
+        />
       )}
 
       {/* Performance Chart */}
@@ -782,4 +792,136 @@ function buildChartData(comparison: ReturnType<typeof usePerformanceComparison>[
 
     return row;
   });
+}
+
+// Human-readable label for the active window. Used in the Period
+// Breakdown card so users know exactly which timeframe the numbers cover.
+function periodLabel(interval: TimeInterval, startDate: string, endDate: string): string {
+  const map: Partial<Record<TimeInterval, string>> = {
+    '1D': 'today',
+    '5D': 'the last 5 days',
+    '1W': 'the last week',
+    '1M': 'the last month',
+    '3M': 'the last 3 months',
+    '6M': 'the last 6 months',
+    '1Y': 'the last year',
+    'YTD': 'year to date',
+    'ALL': 'all time',
+  };
+  if (map[interval]) return map[interval] as string;
+  return `${formatDate(startDate)} → ${formatDate(endDate)}`;
+}
+
+interface PeriodBreakdownCardProps {
+  portfolio: PortfolioPerformance;
+  intervalLabel: string;
+  usdToInr: number | null;
+}
+
+// Period-scoped waterfall: starting value → +/- money in → +/- market gain
+// → ending value. Distinguishes "I added money" from "the market moved",
+// which is the question users actually care about for a given window.
+function PeriodBreakdownCard({ portfolio, intervalLabel, usdToInr }: PeriodBreakdownCardProps) {
+  const { periodStartValue, periodEndValue, periodContributions, periodMarketGain } = portfolio;
+  const totalChange = periodEndValue - periodStartValue;
+
+  // Skip the card when there's nothing meaningful to say (e.g. ALL window
+  // on a brand-new portfolio with start = end = 0).
+  if (periodStartValue === 0 && periodEndValue === 0) return null;
+
+  const gainPct = periodStartValue > 0 ? (periodMarketGain / periodStartValue) * 100 : null;
+
+  const fmtUsd = (inr: number) =>
+    usdToInr ? formatCurrency(inr / usdToInr, 'USD') : null;
+
+  const Row = ({
+    label,
+    value,
+    sign,
+    tone,
+    hint,
+  }: {
+    label: string;
+    value: number;
+    sign: '+' | '-' | '=' | null;
+    tone: 'neutral' | 'in' | 'out' | 'gain' | 'loss';
+    hint?: string;
+  }) => {
+    const toneClass = clsx({
+      'text-surface-100': tone === 'neutral',
+      'text-cyan-400': tone === 'in',
+      'text-amber-400': tone === 'out',
+      'text-green-400': tone === 'gain',
+      'text-red-400': tone === 'loss',
+    });
+    const display = sign === '+' ? `+${formatCurrency(value, 'INR')}` :
+                    sign === '-' ? `−${formatCurrency(Math.abs(value), 'INR')}` :
+                    formatCurrency(value, 'INR');
+    const usd = fmtUsd(Math.abs(value));
+    return (
+      <div className="flex items-center justify-between py-2 border-b border-surface-800 last:border-0">
+        <div>
+          <div className="text-sm text-surface-200">{label}</div>
+          {hint && <div className="text-xs text-surface-500 mt-0.5">{hint}</div>}
+        </div>
+        <div className="text-right">
+          <div className={clsx('text-base font-medium tabular-nums', toneClass)}>{display}</div>
+          {usd && <div className="text-[10px] text-surface-500 tabular-nums">{sign === '+' ? '+' : sign === '-' ? '−' : ''}{usd}</div>}
+        </div>
+      </div>
+    );
+  };
+
+  const contribSign: '+' | '-' = periodContributions >= 0 ? '+' : '-';
+  const gainSign: '+' | '-' = periodMarketGain >= 0 ? '+' : '-';
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-base font-semibold text-surface-100">Period Breakdown</h2>
+          <p className="text-xs text-surface-500 mt-0.5">
+            How your portfolio changed over {intervalLabel} — money you added vs. actual market gain
+          </p>
+        </div>
+        {gainPct !== null && (
+          <div className={clsx('text-right', periodMarketGain >= 0 ? 'text-green-400' : 'text-red-400')}>
+            <div className="text-xs text-surface-500">Market return</div>
+            <div className="text-lg font-semibold tabular-nums">{formatPercent(gainPct)}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="px-1">
+        <Row
+          label="Starting value"
+          value={periodStartValue}
+          sign={null}
+          tone="neutral"
+          hint={`as of ${formatDate(portfolio.startDate)}`}
+        />
+        <Row
+          label={periodContributions >= 0 ? 'Money added' : 'Money withdrawn'}
+          value={periodContributions}
+          sign={contribSign}
+          tone={periodContributions >= 0 ? 'in' : 'out'}
+          hint="net of bank-funded buys and bank-bound sells; dividends excluded"
+        />
+        <Row
+          label={periodMarketGain >= 0 ? 'Market gain' : 'Market loss'}
+          value={periodMarketGain}
+          sign={gainSign}
+          tone={periodMarketGain >= 0 ? 'gain' : 'loss'}
+          hint="ending value minus starting value minus money added"
+        />
+        <Row
+          label="Current value"
+          value={periodEndValue}
+          sign="="
+          tone="neutral"
+          hint={`as of ${formatDate(portfolio.endDate)} · total change ${totalChange >= 0 ? '+' : '−'}${formatCurrency(Math.abs(totalChange), 'INR')}`}
+        />
+      </div>
+    </Card>
+  );
 }
