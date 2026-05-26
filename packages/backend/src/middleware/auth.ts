@@ -17,6 +17,7 @@ export const authPlugin = fp(async function authPlugin(fastify: FastifyInstance)
     const publicPaths = ['/api/auth/login', '/api/auth/register', '/api/auth/refresh'];
     if (publicPaths.some(p => request.url.startsWith(p))) return;
     if (request.url === '/api/health') return;
+    if (request.url === '/api/version') return;
 
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {

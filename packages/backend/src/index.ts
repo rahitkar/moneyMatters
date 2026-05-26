@@ -75,6 +75,25 @@ fastify.get('/api/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
 });
 
+// Version — useful to verify which commit is actually live on a given
+// environment (Render auto-populates RENDER_GIT_COMMIT). Public
+// (no auth) so deploys can be diffed without logging in.
+fastify.get('/api/version', async () => {
+  const commit =
+    process.env.RENDER_GIT_COMMIT ??
+    process.env.GIT_COMMIT ??
+    process.env.SOURCE_COMMIT ??
+    'dev';
+  const branch = process.env.RENDER_GIT_BRANCH ?? process.env.GIT_BRANCH ?? null;
+  return {
+    commit,
+    commitShort: commit.slice(0, 7),
+    branch,
+    deployedAt: process.env.RENDER_DEPLOY_TIMESTAMP ?? null,
+    nodeVersion: process.version,
+  };
+});
+
 // Start server
 const start = async () => {
   try {
