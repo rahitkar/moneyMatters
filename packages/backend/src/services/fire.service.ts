@@ -525,9 +525,14 @@ export const fireService = {
       const val = Math.round(row.total ?? 0);
       if (row.type === 'income') {
         incomeMap.set(row.month, (incomeMap.get(row.month) ?? 0) + val);
-      } else {
+      } else if (row.type === 'expense') {
         expenseMap.set(row.month, (expenseMap.get(row.month) ?? 0) + val);
       }
+      // 'transfer' rows are balance-sheet movements (e.g. salary
+      // sweep into another bank account, money returned from a
+      // wallet). They are neither income nor expense and must not
+      // bias the "what did I save this month" calculation. Falling
+      // through here intentionally drops them.
     }
 
     const months = monthKeys.map((key, i) => {
