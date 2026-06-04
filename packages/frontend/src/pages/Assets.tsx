@@ -1620,7 +1620,12 @@ function TransactionRows({
               </thead>
               <tbody className="divide-y divide-surface-700/50">
                 {transactions.map((tx) => {
+                  // USD cash wallets (IND Money, Zerodha USD) store price = exchange_rate
+                  // so quantity×price is already in INR. price=1 means ManualAssetForm
+                  // initial balance (raw is in USD and CurrencyValue converts correctly).
+                  const isUsdCashRate = currency === 'USD' && assetClass === 'cash' && tx.price !== 1;
                   const invested = tx.quantity * tx.price + (tx.fees ?? 0);
+                  // For USD cash rate txns, curVal uses USD qty × $1/unit (wallet face value)
                   const curVal = tx.type === 'buy' ? tx.quantity * currentPrice : 0;
                   const pnl = tx.type === 'buy' ? curVal - invested : 0;
                   const pnlPct = tx.type === 'buy' && invested > 0 ? (pnl / invested) * 100 : 0;
@@ -1645,10 +1650,14 @@ function TransactionRows({
                         {formatNumber(tx.quantity)}
                       </td>
                       <td className="py-2 px-3 text-sm text-right tabular-nums text-surface-300">
-                        <CurrencyValue value={tx.price} currency={currency} usdToInr={usdToInr} />
+                        {isUsdCashRate
+                          ? <span className="text-surface-400 text-xs">₹{tx.price.toFixed(2)}/USD</span>
+                          : <CurrencyValue value={tx.price} currency={currency} usdToInr={usdToInr} />}
                       </td>
                       <td className="py-2 px-3 text-sm text-right tabular-nums text-surface-200">
-                        <CurrencyValue value={invested} currency={currency} usdToInr={usdToInr} />
+                        {isUsdCashRate
+                          ? <span>{formatCurrency(invested, 'INR')}</span>
+                          : <CurrencyValue value={invested} currency={currency} usdToInr={usdToInr} />}
                       </td>
                       <td className="py-2 px-3 text-sm text-right tabular-nums font-medium text-surface-100">
                         {isBuy

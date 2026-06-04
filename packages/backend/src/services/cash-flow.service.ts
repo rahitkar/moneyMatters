@@ -647,7 +647,15 @@ export const cashFlowService = {
     const inrAmount = (tx: typeof allTx[number]): number => {
       const raw = tx.quantity * tx.price;
       if (tx.assetCurrency === 'INR' || !tx.assetCurrency) return raw;
-      if (tx.assetCurrency === 'USD' && usdInrRate) return raw * usdInrRate;
+      if (tx.assetCurrency === 'USD') {
+        // USD cash-class assets (broker wallets like IND Money) use
+        // DepositWithdrawForm which stores price = exchange_rate (₹/USD),
+        // so raw = quantity × price is already in INR — do NOT multiply again.
+        // The only exception is the initial balance from ManualAssetForm
+        // which uses price = 1 (raw is in USD and must be converted).
+        if (tx.assetClass === 'cash' && tx.price !== 1) return raw;
+        if (usdInrRate) return raw * usdInrRate;
+      }
       // Unknown currency w/o rate: fall back to raw value (better than 0;
       // rare in practice since we only see USD here).
       return raw;

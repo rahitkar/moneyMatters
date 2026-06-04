@@ -30,6 +30,22 @@ import { formatCurrency, formatNumber, formatDate, todayLocal, formatRelativeTim
 import CurrencyValue, { toInr } from '../components/CurrencyValue';
 import type { TransactionWithAsset, TransactionType, Asset, Position } from '../api/types';
 
+/**
+ * Converts a transaction's gross amount to INR.
+ *
+ * USD cash wallet deposits (IND Money, Zerodha USD) store price = exchange_rate
+ * so quantity × price is already in INR — we must NOT multiply by usdToInr again.
+ * Initial balances created by ManualAssetForm use price = 1 (raw is in USD).
+ */
+function txAmountInr(t: TransactionWithAsset, usdToInr: number | null, addFees: boolean): number {
+  const cur = t.asset.currency || 'INR';
+  const fees = t.fees ?? 0;
+  const raw = t.quantity * t.price;
+  const gross = addFees ? raw + fees : raw - fees;
+  if (t.asset.assetClass === 'cash' && cur === 'USD' && t.price !== 1) return gross;
+  return toInr(gross, cur, usdToInr);
+}
+
 export default function Transactions() {
   const { data: transactions, isLoading: txLoading } = useTransactionsWithAssets();
   const { data: positions, isLoading: posLoading } = usePositions();
@@ -54,11 +70,11 @@ export default function Transactions() {
 
     const totalBuyValue = filtered
       .filter((t) => t.type === 'buy')
-      .reduce((sum, t) => sum + toInr(t.quantity * t.price + (t.fees ?? 0), t.asset.currency || 'INR', usdToInr), 0);
+      .reduce((sum, t) => sum + txAmountInr(t, usdToInr, true), 0);
 
     const totalSellValue = filtered
       .filter((t) => t.type === 'sell')
-      .reduce((sum, t) => sum + toInr(t.quantity * t.price - (t.fees ?? 0), t.asset.currency || 'INR', usdToInr), 0);
+      .reduce((sum, t) => sum + txAmountInr(t, usdToInr, false), 0);
 
     const matchingPositions = (positions ?? []).filter(
       (p) =>
@@ -216,6 +232,8 @@ export default function Transactions() {
 function TransactionRow({ tx, usdToInr }: { tx: TransactionWithAsset; usdToInr: number | null }) {
   const deleteTransaction = useDeleteTransaction();
   const cur = tx.asset.currency || 'INR';
+  // USD cash wallets store price = exchange_rate so quantity×price is already INR
+  const isUsdCashRate = cur === 'USD' && tx.asset.assetClass === 'cash' && tx.price !== 1;
 
   const handleDelete = () => {
     if (confirm(`Delete this ${tx.asset.symbol} transaction?`)) {
@@ -255,10 +273,14 @@ function TransactionRow({ tx, usdToInr }: { tx: TransactionWithAsset; usdToInr: 
         {formatNumber(tx.quantity)}
       </td>
       <td className="table-cell text-right tabular-nums">
-        <CurrencyValue value={tx.price} currency={cur} usdToInr={usdToInr} />
+        {isUsdCashRate
+          ? <span className="text-surface-400 text-xs">₹{tx.price.toFixed(2)}/USD</span>
+          : <CurrencyValue value={tx.price} currency={cur} usdToInr={usdToInr} />}
       </td>
       <td className="table-cell text-right tabular-nums font-medium">
-        <CurrencyValue value={tx.quantity * tx.price + (tx.fees ?? 0)} currency={cur} usdToInr={usdToInr} />
+        {isUsdCashRate
+          ? <span>{formatCurrency(tx.quantity * tx.price + (tx.fees ?? 0), 'INR')}</span>
+          : <CurrencyValue value={tx.quantity * tx.price + (tx.fees ?? 0)} currency={cur} usdToInr={usdToInr} />}
       </td>
       <td className="table-cell text-center">
         <button
