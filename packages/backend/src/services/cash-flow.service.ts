@@ -673,7 +673,12 @@ export const cashFlowService = {
       assetName: tx.assetName,
       assetSymbol: tx.assetSymbol,
       amountInr: inrAmount(tx),
-      nativeAmount: tx.quantity * tx.price,
+      // For USD cash wallet deposits price = exchange_rate, so quantity×price
+      // is the INR amount — NOT the native USD quantity. Use tx.quantity (the
+      // actual USD units) so the parenthetical displays e.g. ($522.45) not ($50,000).
+      nativeAmount: (tx.assetClass === 'cash' && tx.assetCurrency === 'USD' && tx.price !== 1)
+        ? tx.quantity
+        : tx.quantity * tx.price,
       currency: tx.assetCurrency ?? 'INR',
     });
 
