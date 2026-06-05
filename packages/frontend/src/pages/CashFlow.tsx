@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowLeftRight,
+  PiggyBank,
 } from 'lucide-react';
 import {
   BarChart,
@@ -556,51 +557,74 @@ export default function CashFlow() {
           </Card>
 
           {/* Stat Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <StatCard
-              label="Income"
-              value={formatCurrency(summary.totals.totalIncome, 'INR')}
-              icon={DollarSign}
-              variant="brand"
-            />
-            <StatCard
-              label="Expenses"
-              value={formatCurrency(summary.totals.totalExpenses, 'INR')}
-              subValue={summary.income.expenseLimit ? `Limit: ${formatCurrency(summary.income.expenseLimit, 'INR')}` : undefined}
-              icon={ShoppingCart}
-              variant="negative"
-            />
-            <StatCard
-              label="Investment"
-              value={formatCurrency(summary.totals.totalInvested, 'INR')}
-              subValue={`${summary.totals.investmentPct.toFixed(1)}% of income`}
-              icon={TrendingUp}
-              variant="brand"
-            />
-            <StatCard
-              label="Need"
-              value={formatCurrency(summary.totals.totalNeed, 'INR')}
-              subValue={`${summary.totals.needPct.toFixed(1)}% of income`}
-              icon={ShoppingCart}
-              variant="negative"
-            />
-            <StatCard
-              label="Luxury"
-              value={formatCurrency(summary.totals.totalLuxury, 'INR')}
-              subValue={`${summary.totals.luxuryPct.toFixed(1)}% of income`}
-              icon={Sparkles}
-              variant="negative"
-            />
-            {summary.totals.totalTransfers > 0 && (
-              <StatCard
-                label="Transfers"
-                value={formatCurrency(summary.totals.totalTransfers, 'INR')}
-                subValue="Reimbursements, money returned"
-                icon={ArrowLeftRight}
-                variant="brand"
-              />
-            )}
-          </div>
+          {(() => {
+            const moneySaved = summary.totals.totalIncome - summary.totals.totalExpenses;
+            const savingsPct = summary.totals.totalIncome > 0
+              ? (moneySaved / summary.totals.totalIncome * 100).toFixed(1)
+              : null;
+            const expensePct = summary.totals.totalIncome > 0
+              ? (summary.totals.totalExpenses / summary.totals.totalIncome * 100).toFixed(1)
+              : null;
+            const expenseSubValue = [
+              expensePct !== null ? `${expensePct}% of income` : null,
+              summary.income.expenseLimit ? `Limit: ${formatCurrency(summary.income.expenseLimit, 'INR')}` : null,
+            ].filter(Boolean).join(' · ') || undefined;
+
+            return (
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                <StatCard
+                  label="Income"
+                  value={formatCurrency(summary.totals.totalIncome, 'INR')}
+                  icon={DollarSign}
+                  variant="brand"
+                />
+                <StatCard
+                  label="Expenses"
+                  value={formatCurrency(summary.totals.totalExpenses, 'INR')}
+                  subValue={expenseSubValue}
+                  icon={ShoppingCart}
+                  variant="negative"
+                />
+                <StatCard
+                  label="Investment"
+                  value={formatCurrency(summary.totals.totalInvested, 'INR')}
+                  subValue={`${summary.totals.investmentPct.toFixed(1)}% of income`}
+                  icon={TrendingUp}
+                  variant="brand"
+                />
+                <StatCard
+                  label="Need"
+                  value={formatCurrency(summary.totals.totalNeed, 'INR')}
+                  subValue={`${summary.totals.needPct.toFixed(1)}% of income`}
+                  icon={ShoppingCart}
+                  variant="negative"
+                />
+                <StatCard
+                  label="Luxury"
+                  value={formatCurrency(summary.totals.totalLuxury, 'INR')}
+                  subValue={`${summary.totals.luxuryPct.toFixed(1)}% of income`}
+                  icon={Sparkles}
+                  variant="negative"
+                />
+                <StatCard
+                  label="Savings"
+                  value={formatCurrency(moneySaved, 'INR')}
+                  subValue={savingsPct !== null ? `${savingsPct}% of income` : undefined}
+                  icon={PiggyBank}
+                  isPositive={moneySaved >= 0}
+                />
+                {summary.totals.totalTransfers > 0 && (
+                  <StatCard
+                    label="Transfers"
+                    value={formatCurrency(summary.totals.totalTransfers, 'INR')}
+                    subValue="Reimbursements, money returned"
+                    icon={ArrowLeftRight}
+                    variant="brand"
+                  />
+                )}
+              </div>
+            );
+          })()}
 
           {/* FIRE Status Indicators — two complementary views.
 
