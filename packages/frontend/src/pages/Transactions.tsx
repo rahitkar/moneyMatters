@@ -37,8 +37,17 @@ import type { TransactionWithAsset, TransactionType, Asset, Position } from '../
  * so quantity × price is already in INR — we must NOT multiply by usdToInr again.
  * Initial balances created by ManualAssetForm use price = 1 (raw is in USD).
  */
+/** Returns the effective currency for a transaction, correcting for the
+ * common case where Indian NSE/BSE stocks were stored with currency='USD'
+ * (the DB schema default) before the price-refresh fix propagated. */
+function txCurrency(t: TransactionWithAsset): string {
+  const sym = t.asset.symbol || '';
+  if (sym.endsWith('.NS') || sym.endsWith('.BO')) return 'INR';
+  return t.asset.currency || 'INR';
+}
+
 function txAmountInr(t: TransactionWithAsset, usdToInr: number | null, addFees: boolean): number {
-  const cur = t.asset.currency || 'INR';
+  const cur = txCurrency(t);
   const fees = t.fees ?? 0;
   const raw = t.quantity * t.price;
   const gross = addFees ? raw + fees : raw - fees;
@@ -231,7 +240,7 @@ export default function Transactions() {
 
 function TransactionRow({ tx, usdToInr }: { tx: TransactionWithAsset; usdToInr: number | null }) {
   const deleteTransaction = useDeleteTransaction();
-  const cur = tx.asset.currency || 'INR';
+  const cur = txCurrency(tx);
   // USD cash wallets store price = exchange_rate so quantity×price is already INR
   const isUsdCashRate = cur === 'USD' && tx.asset.assetClass === 'cash' && tx.price !== 1;
 
