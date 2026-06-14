@@ -324,7 +324,12 @@ function TransactionModal({
     [assets],
   );
   const selectedAsset = assets.find((a) => a.id === formData.assetId);
-  const selectedCurrency = selectedAsset?.currency ?? 'INR';
+  const selectedCurrency = (() => {
+    const sym = selectedAsset?.symbol ?? '';
+    // Indian NSE/BSE stocks always trade in INR regardless of what the DB says
+    if (sym.endsWith('.NS') || sym.endsWith('.BO')) return 'INR';
+    return selectedAsset?.currency ?? 'INR';
+  })();
   const selectedPosition = positions.find((p) => p.assetId === formData.assetId);
   const maxSellQuantity = selectedPosition?.quantity ?? 0;
 

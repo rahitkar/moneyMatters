@@ -213,7 +213,7 @@ export const marketDataService = {
       for (const asset of yahooAssets) {
         const quote = quotes.get(asset.symbol);
         if (quote) {
-          await assetService.updatePrice(asset.id, quote.price, quote.regularMarketTime, quote.previousClose);
+          await assetService.updatePrice(asset.id, quote.price, quote.regularMarketTime, quote.previousClose, undefined, quote.currency);
           updated++;
         } else {
           failed++;

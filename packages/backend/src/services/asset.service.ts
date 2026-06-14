@@ -171,7 +171,8 @@ export const assetService = {
     price: number,
     marketTime?: Date,
     previousClose?: number,
-    userId?: string
+    userId?: string,
+    currency?: string
   ): Promise<void> {
     const assetWhere =
       userId != null
@@ -193,6 +194,7 @@ export const assetService = {
 
     const updates: Record<string, unknown> = { currentPrice: price, lastUpdated: now };
     if (previousClose != null) updates.previousClose = previousClose;
+    if (currency) updates.currency = currency;
 
     await db.update(schema.assets).set(updates).where(assetWhere);
 
