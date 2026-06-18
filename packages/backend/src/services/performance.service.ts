@@ -208,6 +208,11 @@ const CASH_LIKE_ASSET_CLASSES = new Set<string>([
   'external_portfolio',
 ]);
 
+// Asset classes where the unit price is always 1 (face value in native currency).
+// For these, tx.price may encode an exchange rate (USD wallet deposits) rather than
+// a market price, so _calcPortfolioValue must never use getPriceAtDate() for them.
+const PRICE_ALWAYS_ONE_CLASSES = new Set<string>(['cash', 'lended', 'fixed_deposit', 'ppf', 'epf']);
+
 async function computePeriodContributions(
   userId: string,
   startDateStr: string,
@@ -599,6 +604,12 @@ export const performanceService = {
     const priceTimeline = new Map<string, { date: string; price: number }[]>();
 
     for (const tx of transactions) {
+      // Cash-like assets always have unit price = 1 (INR face value).
+      // For USD wallet deposits, tx.price stores the exchange_rate — including
+      // those entries in the price timeline would cause double-conversion in
+      // toInr() inside _calcPortfolioValue. Skip them entirely; the override
+      // in _calcPortfolioValue will use 1 unconditionally for these classes.
+      if (PRICE_ALWAYS_ONE_CLASSES.has(assetClassMap.get(tx.assetId) ?? '')) continue;
       if (!priceTimeline.has(tx.assetId)) priceTimeline.set(tx.assetId, []);
       priceTimeline.get(tx.assetId)!.push({ date: tx.transactionDate, price: tx.price });
     }
@@ -646,7 +657,11 @@ export const performanceService = {
     let total = 0;
     for (const [assetId, quantity] of positions) {
       if (quantity <= 0) continue;
-      const price = getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
+      // Cash-like assets always use price=1 (unit price in their native currency).
+      // Their tx.price may encode an exchange rate, not a market price; using it
+      // would trigger double-conversion when toInr() is called.
+      const isCashLike = PRICE_ALWAYS_ONE_CLASSES.has(assetClassMap.get(assetId) ?? '');
+      const price = isCashLike ? 1 : getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
       const cur = currencyMap.get(assetId) ?? 'INR';
       let value = toInr(quantity * price, cur, usdToInr);
       if (PHYSICAL_METAL_CLASSES.has(assetClassMap.get(assetId) ?? '')) {
@@ -670,7 +685,8 @@ export const performanceService = {
     const result: Record<string, number> = {};
     for (const [assetId, quantity] of positions) {
       if (quantity <= 0) continue;
-      const price = getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
+      const isCashLike = PRICE_ALWAYS_ONE_CLASSES.has(assetClassMap.get(assetId) ?? '');
+      const price = isCashLike ? 1 : getPriceAtDate(priceTimeline.get(assetId) ?? [], date);
       const cur = currencyMap.get(assetId) ?? 'INR';
       let value = toInr(quantity * price, cur, usdToInr);
       if (PHYSICAL_METAL_CLASSES.has(assetClassMap.get(assetId) ?? '')) {

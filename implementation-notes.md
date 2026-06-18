@@ -76,3 +76,60 @@ assetClass === 'cash'  AND  currency === 'USD'  AND  price !== 1
 
 4. **Transactions.tsx totals**: The `totalBuyValue` stat now correctly excludes the
    double-conversion for USD cash deposits. `totalSellValue` was fixed symmetrically.
+
+---
+
+## Bug Fix: Portfolio Chart Cash Spike (June 2–5) — Double-Conversion in performance.service.ts (Jun 17, 2026)
+
+### What was broken
+
+The "Portfolio Performance" chart showed a massive Cash spike around **June 2–5**: the Cash
+category jumped from a realistic ₹5–6L to ~₹53L, inflating the total portfolio to ₹1.2Cr for
+those dates, then silently correcting itself.
+
+### Root cause
+
+`_loadPriceTimelines` in `performance.service.ts` feeds transaction prices into the price
+timeline for **every** asset, including cash-like wallets. For a USD cash wallet deposit made
+via `DepositWithdrawForm`:
+
+```
+tx.price = exchange_rate  (e.g. 84)   ← rate, NOT a market price
+```
+
+For dates June 2–4, `getPriceAtDate(USD_wallet_timeline, date)` returned **84**.
+Then `_calcPortfolioValue` computed:
+
+```
+value = toInr(quantity × 84, 'USD', 84)
+      = quantity × 84 × 84           ← double-conversion: 84² factor
+```
+
+e.g. for 750 USD: `750 × 84 × 84 = ₹52.9L` instead of the correct `750 × 84 = ₹63,000`.
+
+The spike resolved on June 5 because a subsequent `price = 1` transaction reset the timeline.
+
+### Why current positions (Assets page) were unaffected
+
+`getAllPositions` in `transaction.service.ts` explicitly overrides `currentPrice = 1` for
+cash-like assets. This guard was absent from the historical chart path.
+
+### Fix
+
+Three changes to `performance.service.ts`:
+
+1. **New constant** `PRICE_ALWAYS_ONE_CLASSES = new Set(['cash', 'lended', 'fixed_deposit', 'ppf', 'epf'])`.
+2. **`_loadPriceTimelines`**: Skip adding `tx.price` to the timeline for any asset in
+   `PRICE_ALWAYS_ONE_CLASSES` — their "price" in a transaction is an exchange rate, not a
+   market price, and must never be used for historical valuation.
+3. **`_calcPortfolioValue` and `_calcPortfolioValueByCategory`**: When computing historical
+   portfolio value, force `price = 1` for cash-like assets regardless of what the timeline
+   contains. Mirrors the same guard already present in `getAllPositions`.
+
+### Tradeoffs / decisions
+
+- Used a dedicated `PRICE_ALWAYS_ONE_CLASSES` rather than reusing the broader
+  `CASH_LIKE_ASSET_CLASSES` (which includes `bonds` and `external_portfolio`). Bonds have
+  real market prices so they should not be forced to price=1.
+- The fix is also a defence against future form changes that might change encoding conventions:
+  even if someone adds a new deposit path, cash wallets will always use price=1 in chart calc.
