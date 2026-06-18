@@ -118,7 +118,15 @@ async function quoteViaChart(symbol: string): Promise<QuoteResult | null> {
   const price = Number(meta.regularMarketPrice);
   if (!Number.isFinite(price) || price <= 0) return null;
 
-  const prev = Number(meta.chartPreviousClose ?? meta.previousClose ?? price);
+  // Prefer regularMarketPreviousClose (yesterday's actual session close) over
+  // chartPreviousClose, which is the close *before* the chart window starts —
+  // for a 7-day window that's ~8 days ago, not yesterday, producing wrong day change.
+  const prev = Number(
+    meta.regularMarketPreviousClose ??
+    meta.previousClose ??
+    meta.chartPreviousClose ??
+    price
+  );
   const change = price - prev;
   const changePercent = prev > 0 ? (change / prev) * 100 : 0;
 

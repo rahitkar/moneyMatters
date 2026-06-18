@@ -133,3 +133,53 @@ Three changes to `performance.service.ts`:
   real market prices so they should not be forced to price=1.
 - The fix is also a defence against future form changes that might change encoding conventions:
   even if someone adds a new deposit path, cash wallets will always use price=1 in chart calc.
+
+---
+
+## Bug Fix: Day Change Showing Multi-Day Move (Jun 18, 2026)
+
+### What was broken
+
+The "Day Change" column and stat card were showing incorrect values — e.g. ICICI PRUD NIFTY ETF
++4.29% and TRENT LTD +17.29% on a day when neither moved that much. Current price was correct.
+
+### Root cause
+
+`quoteViaChart` in `yahoo-finance.provider.ts` (the `/v8/chart` fallback used when Yahoo
+rate-limits the main `/v7/quote` endpoint) was reading `chartPreviousClose` from the chart
+metadata as the "previous close":
+
+```typescript
+const prev = Number(meta.chartPreviousClose ?? meta.previousClose ?? price);
+```
+
+`chartPreviousClose` is the closing price of the trading day **before the chart window
+starts** — not yesterday's close. With `period1 = now − 7 days`, this is the close from
+~8 days ago.
+
+When Yahoo rate-limited the `/v7` endpoint partway through a price refresh (triggered by a
+server restart after the Jun 17 deployment), the `preferChartFirst` flag flipped to `true`
+for the rest of that process. Subsequent assets fetched via `quoteViaChart` got an 8-day-old
+`previousClose` written to the DB. The current price was correct (from `regularMarketPrice`),
+but the stale previous close made day change look like a multi-day move.
+
+### Fix
+
+In `quoteViaChart`, prioritize `regularMarketPreviousClose` (Yahoo's field for the previous
+trading session's actual close) over `chartPreviousClose`:
+
+```typescript
+const prev = Number(
+  meta.regularMarketPreviousClose ??
+  meta.previousClose ??
+  meta.chartPreviousClose ??   // kept as last resort — only correct for 1-day charts
+  price
+);
+```
+
+File: `packages/backend/src/providers/yahoo-finance.provider.ts`
+
+### Recovery
+
+After deploying this fix, trigger a manual price refresh ("Refresh Prices" button in the app)
+to overwrite the stale `previousClose` values in the DB with correct ones.
