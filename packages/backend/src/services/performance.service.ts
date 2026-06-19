@@ -800,6 +800,17 @@ export const performanceService = {
     const firstTxDate = transactions[0].transactionDate;
     const includesInception = startDateStr <= firstTxDate;
 
+    // For USD cash-like assets (broker wallets), tx.price stores the exchange rate
+    // so tx.quantity * tx.price is already in INR. Applying toInr() on top would
+    // double-convert by another 84×, massively inflating NAV units and collapsing
+    // the NAV-based period return. Same guard as _calcPortfolioValue.
+    const calcTxAmountInr = (tx: typeof transactions[number], cur: string): number => {
+      const raw = tx.quantity * tx.price;
+      const assetClass = assetClassMap.get(tx.assetId) ?? '';
+      if (PRICE_ALWAYS_ONE_CLASSES.has(assetClass) && cur === 'USD' && tx.price !== 1) return raw;
+      return toInr(raw, cur, usdToInr);
+    };
+
     // Phase 1: replay all transactions BEFORE the interval to build up
     // correct positions, units, and NAV state without recording history
     const positions = new Map<string, number>();
@@ -816,7 +827,7 @@ export const performanceService = {
       if (units > 0 && preValue > 0) nav = preValue / units;
 
       const cur = currencyMap.get(tx.assetId) ?? 'INR';
-      const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+      const txAmountInr = calcTxAmountInr(tx, cur);
       if (tx.type === 'buy') {
         if (units === 0) nav = BASE_NAV;
         units += txAmountInr / nav;
@@ -847,7 +858,7 @@ export const performanceService = {
         if (units > 0 && preValue > 0) nav = preValue / units;
 
         const cur = currencyMap.get(tx.assetId) ?? 'INR';
-        const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+        const txAmountInr = calcTxAmountInr(tx, cur);
         if (tx.type === 'buy') {
           if (units === 0) nav = BASE_NAV;
           units += txAmountInr / nav;
@@ -878,7 +889,7 @@ export const performanceService = {
         if (units > 0 && preValue > 0) nav = preValue / units;
 
         const cur = currencyMap.get(tx.assetId) ?? 'INR';
-        const txAmountInr = toInr(tx.quantity * tx.price, cur, usdToInr);
+        const txAmountInr = calcTxAmountInr(tx, cur);
         if (tx.type === 'buy') {
           if (units === 0) nav = BASE_NAV;
           units += txAmountInr / nav;
